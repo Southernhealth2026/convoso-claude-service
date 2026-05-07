@@ -8,6 +8,7 @@ notes field in Convoso.
 Flow:
   Convoso disposition fires webhook -> /webhook endpoint
   -> Parse the call data (handles both JSON and form-encoded)
+  -> If lead_id is missing, look it up by phone number
   -> Call Anthropic API to generate summary
   -> POST summary to Convoso /leads/update
   -> Done. Notes field on the lead now has Claude's summary.
@@ -34,13 +35,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("convoso-claude")
 
-# Environment variables (set these in Render's dashboard)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 CONVOSO_AUTH_TOKEN = os.environ.get("CONVOSO_AUTH_TOKEN")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 CONVOSO_API_BASE = "https://api.convoso.com/v1"
 
-# Validate at startup so misconfiguration fails loudly
 if not ANTHROPIC_API_KEY:
     log.warning("ANTHROPIC_API_KEY is not set!")
 if not CONVOSO_AUTH_TOKEN:
@@ -51,44 +50,25 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY els
 
 # ---------------------------------------------------------------------------
 # Webhook payload parsing
-#
-# Convoso sends data in a way that confuses Make.com (the entire JSON ends
-# up as a form-encoded key with no value). We handle every reasonable shape
-# here so we don't care how Convoso formats it.
 # ---------------------------------------------------------------------------
 
 def parse_convoso_payload(req):
     """Extract a dict of call data from the incoming request, no matter
-    how Convoso wraps it.
-
-    Handles:
-      1. application/json with a normal JSON body
-      2. application/x-www-form-urlencoded where the JSON is the key name
-         (the Convoso-Connect-into-Make.com behavior)
-      3. application/x-www-form-urlencoded with normal key=value pairs
-      4. raw JSON sent as text/plain
-    """
+    how Convoso wraps it."""
     content_type = (req.content_type or "").lower()
     raw_body = req.get_data(as_text=True)
 
     log.info("Incoming Content-Type: %s", content_type)
     log.info("Raw body (first 500 chars): %s", raw_body[:500])
 
-    # Case 1: proper JSON body
     if "application/json" in content_type:
         try:
             return req.get_json(force=True, silent=False)
         except Exception as e:
             log.warning("Failed to parse as JSON despite Content-Type: %s", e)
 
-    # Case 2 + 3: form-encoded
     if "application/x-www-form-urlencoded" in content_type or "=" in raw_body:
-        # First try: maybe Convoso sent the JSON as the key name (the bug we hit
-        # in Make.com). Form-decoded, this looks like: {"...":"..."}=
         decoded = urllib.parse.unquote_plus(raw_body)
-
-        # Convoso's quirk: body is `<json>=` - the JSON is the parameter name
-        # and the value is empty. Strip the trailing `=` and try to parse.
         candidate = decoded.rstrip("=").strip()
         if candidate.startswith("{") and candidate.endswith("}"):
             try:
@@ -96,10 +76,8 @@ def parse_convoso_payload(req):
             except json.JSONDecodeError:
                 pass
 
-        # Otherwise treat as normal form data
         form_data = req.form.to_dict()
         if form_data:
-            # If the form contains a single key whose name is JSON, parse that
             if len(form_data) == 1:
                 only_key = next(iter(form_data.keys()))
                 if only_key.startswith("{"):
@@ -109,7 +87,6 @@ def parse_convoso_payload(req):
                         pass
             return form_data
 
-    # Case 4: raw text that looks like JSON
     stripped = raw_body.strip().rstrip("=")
     if stripped.startswith("{"):
         try:
@@ -118,6 +95,82 @@ def parse_convoso_payload(req):
             pass
 
     raise ValueError(f"Could not parse payload. Body: {raw_body[:300]}")
+
+
+# ---------------------------------------------------------------------------
+# Convoso lead lookup by phone number
+# ---------------------------------------------------------------------------
+
+def normalize_phone(phone):
+    """Strip everything that isn't a digit."""
+    if not phone:
+        return ""
+    return "".join(c for c in str(phone) if c.isdigit())
+
+
+def lookup_lead_id_by_phone(phone_number):
+    """Search Convoso for a lead by phone number and return the lead_id."""
+    phone_digits = normalize_phone(phone_number)
+    if not phone_digits:
+        raise ValueError("Cannot lookup - phone number is empty")
+
+    # Strip leading 1 from US 11-digit numbers
+    if len(phone_digits) == 11 and phone_digits.startswith("1"):
+        phone_digits = phone_digits[1:]
+
+    url = f"{CONVOSO_API_BASE}/leads/search"
+    payload = {
+        "auth_token": CONVOSO_AUTH_TOKEN,
+        "phone_number": phone_digits,
+        "limit": 5,
+        "offset": 0,
+    }
+
+    log.info("Looking up lead by phone: %s", phone_digits)
+    resp = requests.post(url, data=payload, timeout=30)
+
+    try:
+        body = resp.json()
+    except ValueError:
+        raise RuntimeError(f"Convoso lookup returned non-JSON: {resp.text[:200]}")
+
+    if not body.get("success"):
+        raise RuntimeError(f"Convoso lookup failed: {body}")
+
+    data = body.get("data", {})
+    entries = data.get("entries", []) if isinstance(data, dict) else []
+
+    if not entries:
+        raise RuntimeError(f"No lead found for phone {phone_digits}")
+
+    def sort_key(lead):
+        return (
+            lead.get("modified_at") or "",
+            int(lead.get("id", 0)) if str(lead.get("id", "0")).isdigit() else 0,
+        )
+    entries.sort(key=sort_key, reverse=True)
+
+    lead_id = entries[0].get("id")
+    log.info("Found lead_id=%s for phone %s (out of %d matches)",
+             lead_id, phone_digits, len(entries))
+    return lead_id
+
+
+def resolve_lead_id(call_data):
+    """Get the lead_id either from the payload or by phone lookup."""
+    lead_id = call_data.get("lead_id")
+    if lead_id:
+        log.info("lead_id found directly in payload: %s", lead_id)
+        return lead_id
+
+    phone = (call_data.get("phone_number_call")
+             or call_data.get("phone_number")
+             or call_data.get("phone"))
+
+    if not phone:
+        raise ValueError("Payload has no lead_id and no phone number to look up")
+
+    return lookup_lead_id_by_phone(phone)
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +198,6 @@ def generate_summary(call_data):
     if not claude:
         raise RuntimeError("Anthropic client is not configured")
 
-    # Build a clean context block for Claude. Skip empty/null fields so
-    # Claude doesn't waste output explaining what's missing.
     relevant_fields = {
         "Lead first name": call_data.get("first_name"),
         "Lead last name": call_data.get("last_name"),
@@ -166,11 +217,9 @@ def generate_summary(call_data):
              if value not in (None, "", 0)]
 
     if not lines:
-        # Pathological case - genuinely no useful data
         return "Call completed. No additional details captured."
 
     user_message = "Call data:\n" + "\n".join(lines)
-
     log.info("Sending %d fields to Claude", len(lines))
 
     response = claude.messages.create(
@@ -223,7 +272,7 @@ def update_convoso_lead_notes(lead_id, notes):
 
 @app.route("/", methods=["GET"])
 def health():
-    """Render's health check hits this. Also a friendly landing page."""
+    """Render's health check hits this."""
     return jsonify({
         "service": "convoso-claude-summary",
         "status": "running",
@@ -245,16 +294,19 @@ def webhook():
 
     log.info("Parsed payload keys: %s", list(call_data.keys()))
 
-    lead_id = call_data.get("lead_id")
-    if not lead_id:
-        log.error("No lead_id in payload: %s", call_data)
-        return jsonify({"ok": False, "error": "missing_lead_id"}), 400
+    try:
+        lead_id = resolve_lead_id(call_data)
+    except Exception as e:
+        log.exception("Could not resolve lead_id")
+        return jsonify({"ok": False, "error": "lead_id_unresolvable",
+                        "detail": str(e)}), 400
 
     try:
         summary = generate_summary(call_data)
     except Exception as e:
         log.exception("Claude call failed")
-        return jsonify({"ok": False, "error": "claude_failed", "detail": str(e)}), 500
+        return jsonify({"ok": False, "error": "claude_failed",
+                        "detail": str(e)}), 500
 
     try:
         result = update_convoso_lead_notes(lead_id, summary)
@@ -274,10 +326,6 @@ def webhook():
         "convoso_response": result,
     })
 
-
-# ---------------------------------------------------------------------------
-# Local dev entrypoint (Render uses gunicorn via Procfile)
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
