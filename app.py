@@ -7,9 +7,10 @@ Phase 2: Monitors Convoso operations every 30 seconds, surfaces anomalies on
          a live dashboard at /dashboard.
 
 Stage 1 monitors:
-  - Campaign continuity     (via /campaigns/search)
-  - Drop rate spikes        (via /agent-performance/search aggregated)
-  - List depth (hopper)     (via /lists/search + /leads/search per list)
+  - Campaign continuity   (via /campaigns/search)
+  - Non-connect rate      (via /agent-performance/search:
+                            (calls - human_answered - am) / calls )
+  - List depth (hopper)   (via /lists/search + /leads/search per list)
 """
 
 import json
@@ -46,8 +47,10 @@ CONVOSO_API_BASE = "https://api.convoso.com/v1"
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 
-DROP_RATE_WARN_THRESHOLD = float(os.environ.get("DROP_RATE_WARN_THRESHOLD", "0.04"))
-DROP_RATE_CRIT_THRESHOLD = float(os.environ.get("DROP_RATE_CRIT_THRESHOLD", "0.06"))
+# Non-connect rate thresholds (how much of calls dialed didn't connect to a human or AM)
+# Defaults are intentionally generous - tune via env vars once you have a baseline.
+NON_CONNECT_WARN_THRESHOLD = float(os.environ.get("NON_CONNECT_WARN_THRESHOLD", "0.65"))  # 65%
+NON_CONNECT_CRIT_THRESHOLD = float(os.environ.get("NON_CONNECT_CRIT_THRESHOLD", "0.80"))  # 80%
 
 HOPPER_WARN_LEADS = int(os.environ.get("HOPPER_WARN_LEADS", "1000"))
 HOPPER_CRIT_LEADS = int(os.environ.get("HOPPER_CRIT_LEADS", "200"))
@@ -70,9 +73,9 @@ class StateStore:
         self.last_poll_at = None
         self.last_poll_status = "pending"
         self.monitors = {
-            "campaign_pauses": {"status": "pending", "data": None, "error": None},
-            "drop_rate":       {"status": "pending", "data": None, "error": None},
-            "hopper":          {"status": "pending", "data": None, "error": None},
+            "campaign_pauses":  {"status": "pending", "data": None, "error": None},
+            "non_connect_rate": {"status": "pending", "data": None, "error": None},
+            "hopper":           {"status": "pending", "data": None, "error": None},
         }
         self.anomalies = deque(maxlen=200)
         self.previous = {}
@@ -352,31 +355,20 @@ def monitor_campaign_pauses():
     })
 
 
-# ---- Drop rate via /agent-performance/search ----
+# ---- Non-connect rate via /agent-performance/search ----
 #
-# /agent-performance/search returns:
-#   { "success": true, "code": 200, "total": 20, "data": { "<agent_id>": {...stats...}, ... } }
+# Fields available on this account (from probe):
+#   calls, human_answered, am, others, ...
 #
-# Each agent's stat block contains aggregated call counters. We sum the drop-like
-# counter across all agents and divide by sum of total calls.
+# Non-connect = calls that didn't reach a human and didn't go to AM.
+# Formula:
+#   non_connect = calls - human_answered - am
+#   non_connect_rate = non_connect / calls
 #
-# We don't know the exact field names for "drops" and "total calls" in the response
-# (they vary by Convoso build), so we try several common names.
-
-DROP_FIELD_CANDIDATES = [
-    "drops", "drop", "dropped_calls", "dropped",
-    "abandons", "abandoned", "abandoned_calls", "abandon_calls",
-    "drops_count", "drop_count",
-]
-TOTAL_FIELD_CANDIDATES = [
-    "total_calls", "calls", "calls_count", "call_count",
-    "calls_made", "calls_taken", "calls_handled",
-    "outbound_calls", "answered_calls",
-]
-
+# This captures dropped calls, busy signals, no-answers, network failures, etc.
+# It's a more honest "call delivery failure" metric than just drops.
 
 def _to_number(v):
-    """Coerce a value to a float, return None if not numeric."""
     if v is None or v == "":
         return None
     try:
@@ -396,113 +388,97 @@ def fetch_agent_performance():
         raise ConvosoAPIError(
             f"agent-performance returned unexpected data shape: {type(data).__name__}"
         )
-    return data    # {agent_id: {stats}}
+    return data
 
 
-def monitor_drop_rate():
+def monitor_non_connect_rate():
     try:
         agents = fetch_agent_performance()
     except ConvosoAPIError as e:
-        state.update_monitor("drop_rate", "error", error=str(e))
+        state.update_monitor("non_connect_rate", "error", error=str(e))
         return
 
     if not agents:
-        state.update_monitor("drop_rate", "ok", data={
-            "rate": 0.0, "drops": 0, "total_calls": 0,
-            "warn_threshold": DROP_RATE_WARN_THRESHOLD,
-            "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
+        state.update_monitor("non_connect_rate", "ok", data={
+            "rate": 0.0, "non_connects": 0, "total_calls": 0,
+            "warn_threshold": NON_CONNECT_WARN_THRESHOLD,
+            "crit_threshold": NON_CONNECT_CRIT_THRESHOLD,
             "severity": "ok",
             "note": "No agents in the response.",
         })
         return
 
-    # Discover which fields are present in the first non-empty agent record.
-    sample_agent = None
-    for v in agents.values():
-        if isinstance(v, dict) and v:
-            sample_agent = v
-            break
-
-    if sample_agent is None:
-        state.update_monitor("drop_rate", "needs_setup", error=(
-            "agent-performance returned but no agent records had usable fields."
-        ))
-        return
-
-    drop_field = None
-    total_field = None
-    for k in DROP_FIELD_CANDIDATES:
-        if k in sample_agent:
-            drop_field = k
-            break
-    for k in TOTAL_FIELD_CANDIDATES:
-        if k in sample_agent:
-            total_field = k
-            break
-
-    if drop_field is None or total_field is None:
-        # Surface what fields ARE there so we can map them
-        sample_keys = list(sample_agent.keys())
-        state.update_monitor("drop_rate", "needs_setup", error=(
-            f"Drop rate could not be computed. Looking for drop field "
-            f"({DROP_FIELD_CANDIDATES[0]} etc.) and total-calls field "
-            f"({TOTAL_FIELD_CANDIDATES[0]} etc.) but none were found. "
-            f"Available agent fields: {sample_keys[:30]}"
-        ))
-        return
-
-    total_drops = 0.0
     total_calls = 0.0
+    total_human = 0.0
+    total_am = 0.0
     agents_counted = 0
+    sample_keys = None
 
     for agent_id, stats in agents.items():
         if not isinstance(stats, dict):
             continue
-        d = _to_number(stats.get(drop_field))
-        t = _to_number(stats.get(total_field))
-        if d is None or t is None:
+        if sample_keys is None:
+            sample_keys = list(stats.keys())
+        calls = _to_number(stats.get("calls"))
+        human = _to_number(stats.get("human_answered"))
+        am = _to_number(stats.get("am"))
+        if calls is None:
             continue
-        total_drops += d
-        total_calls += t
+        total_calls += calls
+        if human is not None:
+            total_human += human
+        if am is not None:
+            total_am += am
         agents_counted += 1
 
+    if agents_counted == 0:
+        state.update_monitor("non_connect_rate", "needs_setup", error=(
+            f"No agent records had a 'calls' field. "
+            f"Sample keys seen: {sample_keys[:30] if sample_keys else 'none'}"
+        ))
+        return
+
     if total_calls == 0:
-        state.update_monitor("drop_rate", "ok", data={
-            "rate": 0.0, "drops": 0, "total_calls": 0,
-            "warn_threshold": DROP_RATE_WARN_THRESHOLD,
-            "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
+        state.update_monitor("non_connect_rate", "ok", data={
+            "rate": 0.0, "non_connects": 0, "total_calls": 0,
+            "human_answered": 0, "am": 0,
+            "warn_threshold": NON_CONNECT_WARN_THRESHOLD,
+            "crit_threshold": NON_CONNECT_CRIT_THRESHOLD,
             "severity": "ok",
             "agents_counted": agents_counted,
-            "drop_field": drop_field, "total_field": total_field,
             "note": "No calls reported by any agent today.",
         })
         return
 
-    rate = total_drops / total_calls
+    non_connects = max(0.0, total_calls - total_human - total_am)
+    rate = non_connects / total_calls
+
     severity = "ok"
-    if rate >= DROP_RATE_CRIT_THRESHOLD:
+    if rate >= NON_CONNECT_CRIT_THRESHOLD:
         severity = "critical"
-    elif rate >= DROP_RATE_WARN_THRESHOLD:
+    elif rate >= NON_CONNECT_WARN_THRESHOLD:
         severity = "warning"
 
     if severity in ("warning", "critical"):
         state.add_anomaly(
-            severity=severity, monitor="drop_rate",
-            title=f"Drop rate at {rate*100:.2f}%",
-            detail=f"{int(total_drops)} drops out of {int(total_calls)} calls across {agents_counted} agents.",
-            fingerprint=f"drop_rate:{severity}",
+            severity=severity, monitor="non_connect_rate",
+            title=f"Non-connect rate at {rate*100:.1f}%",
+            detail=(f"{int(non_connects)} non-connects out of {int(total_calls)} dialed "
+                    f"across {agents_counted} agents "
+                    f"(human: {int(total_human)}, AM: {int(total_am)})."),
+            fingerprint=f"non_connect_rate:{severity}",
         )
 
-    state.update_monitor("drop_rate", "ok", data={
+    state.update_monitor("non_connect_rate", "ok", data={
         "rate": rate,
-        "drops": int(total_drops),
+        "non_connects": int(non_connects),
         "total_calls": int(total_calls),
-        "warn_threshold": DROP_RATE_WARN_THRESHOLD,
-        "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
+        "human_answered": int(total_human),
+        "am": int(total_am),
+        "warn_threshold": NON_CONNECT_WARN_THRESHOLD,
+        "crit_threshold": NON_CONNECT_CRIT_THRESHOLD,
         "severity": severity,
         "agents_counted": agents_counted,
-        "drop_field": drop_field,
-        "total_field": total_field,
     })
 
 
@@ -631,9 +607,9 @@ def run_all_monitors():
     log.info("Monitor poll cycle starting")
     statuses = []
     for name, fn in [
-        ("campaign_pauses", monitor_campaign_pauses),
-        ("drop_rate",       monitor_drop_rate),
-        ("hopper",          monitor_hopper_depletion),
+        ("campaign_pauses",  monitor_campaign_pauses),
+        ("non_connect_rate", monitor_non_connect_rate),
+        ("hopper",           monitor_hopper_depletion),
     ]:
         try:
             fn()
@@ -771,7 +747,6 @@ def api_diagnose():
 
 @app.route("/api/probe", methods=["GET"])
 def api_probe():
-    """?path=/agent-performance/search to inspect what fields come back."""
     path = request.args.get("path")
     if not path:
         return jsonify({"error": "Pass ?path=/some/endpoint"}), 400
