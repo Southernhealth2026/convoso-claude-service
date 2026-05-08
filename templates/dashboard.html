@@ -381,16 +381,12 @@
     letter-spacing: 0.5em;
   }
 
-  .fade-in {
-    animation: fadeIn 600ms ease both;
-  }
+  .fade-in { animation: fadeIn 600ms ease both; }
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: none; }
   }
-  .updated-flash {
-    animation: flash 1200ms ease;
-  }
+  .updated-flash { animation: flash 1200ms ease; }
   @keyframes flash {
     0%   { background-color: rgba(184, 146, 75, 0.18); }
     100% { background-color: transparent; }
@@ -439,9 +435,9 @@
       <h3>Campaign continuity</h3>
       <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
     </article>
-    <article class="card" id="card-drop_rate">
+    <article class="card" id="card-non_connect_rate">
       <div class="eyebrow">Monitor 02</div>
-      <h3>Drop rate</h3>
+      <h3>Non-connect rate</h3>
       <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
     </article>
     <article class="card" id="card-hopper">
@@ -464,7 +460,7 @@
   <footer>
     <span>Southern Health · Operations</span>
     <span class="ornament">· · ·</span>
-    <span id="version-text">v0.3 · Stage 1</span>
+    <span id="version-text">v0.4 · Stage 1</span>
   </footer>
 
 </div>
@@ -540,8 +536,8 @@
     `;
   }
 
-  function renderDropRateCard(monitor) {
-    const card = document.getElementById("card-drop_rate");
+  function renderNonConnectCard(monitor) {
+    const card = document.getElementById("card-non_connect_rate");
     let body;
     let cardClass = "card";
     let tag = "idle";
@@ -563,14 +559,14 @@
       if (d.agents_counted) breakdownExtras.push(`<span>Agents<b>${d.agents_counted}</b></span>`);
       body = `
         <div class="metric">
-          <span class="big">${(d.rate * 100).toFixed(2)}</span>
-          <span class="unit">% drop</span>
+          <span class="big">${(d.rate * 100).toFixed(1)}</span>
+          <span class="unit">% non-connect</span>
         </div>
         <div class="breakdown">
-          <span>Drops<b>${d.drops}</b></span>
           <span>Calls<b>${d.total_calls}</b></span>
+          <span>Live<b>${d.human_answered}</b></span>
+          <span>AM<b>${d.am}</b></span>
           ${breakdownExtras.join("")}
-          <span>Threshold<b>${(d.warn_threshold * 100).toFixed(1)}%</b></span>
         </div>`;
     } else {
       body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
@@ -580,7 +576,7 @@
     card.innerHTML = `
       <span class="card-tag ${tag}">${tagLabel(monitor.status, monitor.data && monitor.data.severity)}</span>
       <div class="eyebrow">Monitor 02</div>
-      <h3>Drop rate</h3>
+      <h3>Non-connect rate</h3>
       ${body}
     `;
   }
@@ -601,7 +597,6 @@
       body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
     } else if (monitor.data && Array.isArray(monitor.data.lists) && monitor.data.lists.length) {
       const lists = monitor.data.lists;
-      // Find the worst (lowest remaining) list
       const lowest = [...lists].sort((a, b) => a.remaining - b.remaining)[0];
       const sev = lowest.severity || "ok";
       tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
@@ -694,7 +689,7 @@
 
       updateStatusPill(snap.last_poll_status, snap.anomalies || []);
       renderCampaignCard(snap.monitors.campaign_pauses);
-      renderDropRateCard(snap.monitors.drop_rate);
+      renderNonConnectCard(snap.monitors.non_connect_rate);
       renderHopperCard(snap.monitors.hopper);
       renderFeed(snap.anomalies);
 
