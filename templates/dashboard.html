@@ -9,17 +9,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* ----------------------------------------------------------------
-     Tokens
-     ---------------------------------------------------------------- */
   :root {
-    --ink:        #0E2240;        /* deep navy */
+    --ink:        #0E2240;
     --ink-soft:   #2C3E5C;
     --ink-faint:  rgba(14, 34, 64, 0.55);
-    --paper:      #F5EFE3;        /* warm cream */
+    --paper:      #F5EFE3;
     --paper-dim:  #EBE3D2;
     --bone:       #FAF7F0;
-    --gold:       #B8924B;        /* muted antique gold */
+    --gold:       #B8924B;
     --gold-soft:  #D4B97A;
     --hairline:   rgba(14, 34, 64, 0.15);
     --hairline-strong: rgba(14, 34, 64, 0.28);
@@ -55,7 +52,6 @@
     min-height: 100vh;
   }
 
-  /* Subtle paper grain */
   body::before {
     content: "";
     position: fixed; inset: 0;
@@ -73,9 +69,6 @@
     padding: 48px 56px 96px;
   }
 
-  /* ----------------------------------------------------------------
-     Masthead
-     ---------------------------------------------------------------- */
   .masthead {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -171,9 +164,6 @@
     color: var(--ink-faint);
   }
 
-  /* ----------------------------------------------------------------
-     Section headers
-     ---------------------------------------------------------------- */
   .section-head {
     display: flex;
     align-items: baseline;
@@ -200,9 +190,6 @@
     margin-bottom: 8px;
   }
 
-  /* ----------------------------------------------------------------
-     Monitor cards grid
-     ---------------------------------------------------------------- */
   .monitors {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -318,9 +305,6 @@
   .card-tag.info  { color: var(--info); }
   .card-tag.idle  { color: var(--ink-faint); }
 
-  /* ----------------------------------------------------------------
-     Anomaly feed
-     ---------------------------------------------------------------- */
   .feed {
     border-top: 1px solid var(--hairline-strong);
     border-bottom: 1px solid var(--hairline-strong);
@@ -377,9 +361,6 @@
     color: var(--ink-faint);
   }
 
-  /* ----------------------------------------------------------------
-     Footer
-     ---------------------------------------------------------------- */
   footer {
     margin-top: 64px;
     padding-top: 28px;
@@ -400,9 +381,6 @@
     letter-spacing: 0.5em;
   }
 
-  /* ----------------------------------------------------------------
-     Loading / fade
-     ---------------------------------------------------------------- */
   .fade-in {
     animation: fadeIn 600ms ease both;
   }
@@ -418,9 +396,6 @@
     100% { background-color: transparent; }
   }
 
-  /* ----------------------------------------------------------------
-     Responsive
-     ---------------------------------------------------------------- */
   @media (max-width: 900px) {
     .wrap { padding: 32px 24px 64px; }
     .monitors { grid-template-columns: 1fr; }
@@ -433,7 +408,6 @@
 <body>
 <div class="wrap">
 
-  <!-- ======================== Masthead ======================== -->
   <header class="masthead fade-in">
     <div>
       <div class="brand-line">Southern Health · Operations Terminal</div>
@@ -453,7 +427,6 @@
     <span id="next-poll-text">Next refresh in 30s</span>
   </div>
 
-  <!-- ======================== Monitors ======================== -->
   <div class="section-head fade-in" style="animation-delay:80ms">
     <span class="num">I.</span>
     <h2>Live conditions</h2>
@@ -461,7 +434,6 @@
   </div>
 
   <section class="monitors" id="monitors">
-    <!-- Cards rendered by JS -->
     <article class="card" id="card-campaign_pauses">
       <div class="eyebrow">Monitor 01</div>
       <h3>Campaign continuity</h3>
@@ -479,7 +451,6 @@
     </article>
   </section>
 
-  <!-- ======================== Anomaly Feed ======================== -->
   <div class="section-head fade-in" style="animation-delay:160ms">
     <span class="num">II.</span>
     <h2>Detected anomalies</h2>
@@ -490,19 +461,15 @@
     <div class="feed-empty">No anomalies on record.</div>
   </section>
 
-  <!-- ======================== Footer ======================== -->
   <footer>
     <span>Southern Health · Operations</span>
     <span class="ornament">· · ·</span>
-    <span id="version-text">v0.2 · Stage 1</span>
+    <span id="version-text">v0.3 · Stage 1</span>
   </footer>
 
 </div>
 
 <script>
-  /* --------------------------------------------------------------
-     Dashboard refresh logic
-     -------------------------------------------------------------- */
   const REFRESH_MS = 30000;
   let countdownTimer = null;
   let nextPollSeconds = REFRESH_MS / 1000;
@@ -517,11 +484,6 @@
     if (min < 60) return min + "m ago";
     const hr = Math.floor(min / 60);
     return hr + "h ago";
-  }
-
-  function fmtPct(n) {
-    if (n == null || isNaN(n)) return "—";
-    return (n * 100).toFixed(1) + "%";
   }
 
   function updateStatusPill(status, anomalies) {
@@ -597,6 +559,8 @@
       const sev = d.severity || "ok";
       tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
       cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
+      const breakdownExtras = [];
+      if (d.agents_counted) breakdownExtras.push(`<span>Agents<b>${d.agents_counted}</b></span>`);
       body = `
         <div class="metric">
           <span class="big">${(d.rate * 100).toFixed(2)}</span>
@@ -605,6 +569,7 @@
         <div class="breakdown">
           <span>Drops<b>${d.drops}</b></span>
           <span>Calls<b>${d.total_calls}</b></span>
+          ${breakdownExtras.join("")}
           <span>Threshold<b>${(d.warn_threshold * 100).toFixed(1)}%</b></span>
         </div>`;
     } else {
@@ -634,23 +599,30 @@
       tag = "info";
       cardClass += " setup";
       body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
-    } else if (monitor.data && monitor.data.campaigns && monitor.data.campaigns.length) {
-      const camps = monitor.data.campaigns;
-      const lowest = [...camps].sort((a, b) => a.pct - b.pct)[0];
-      const sev = lowest.severity;
+    } else if (monitor.data && Array.isArray(monitor.data.lists) && monitor.data.lists.length) {
+      const lists = monitor.data.lists;
+      // Find the worst (lowest remaining) list
+      const lowest = [...lists].sort((a, b) => a.remaining - b.remaining)[0];
+      const sev = lowest.severity || "ok";
       tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
       cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
+
+      const warningCount = lists.filter(L => L.severity === "warning").length;
+      const criticalCount = lists.filter(L => L.severity === "critical").length;
+
       body = `
         <div class="metric">
-          <span class="big">${(lowest.pct * 100).toFixed(0)}</span>
-          <span class="unit">% lowest</span>
+          <span class="big">${formatLeads(lowest.remaining)}</span>
+          <span class="unit">leads · lowest</span>
         </div>
         <div class="breakdown">
-          <span>Campaign<b>${escapeHtml(lowest.campaign_name || "—")}</b></span>
-          <span>Remaining<b>${lowest.remaining}</b></span>
+          <span>List<b>${escapeHtml(truncate(lowest.list_name, 24))}</b></span>
+          <span>Active<b>${monitor.data.active_total || lists.length}</b></span>
+          ${criticalCount ? `<span>Critical<b>${criticalCount}</b></span>` : ""}
+          ${warningCount ? `<span>Warning<b>${warningCount}</b></span>` : ""}
         </div>`;
     } else if (monitor.data) {
-      body = `<div class="needs-setup-msg">No active campaigns with hopper data.</div>`;
+      body = `<div class="needs-setup-msg">${escapeHtml(monitor.data.note || "No active lists found.")}</div>`;
     } else {
       body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
     }
@@ -662,6 +634,18 @@
       <h3>Hopper depth</h3>
       ${body}
     `;
+  }
+
+  function formatLeads(n) {
+    if (n == null) return "—";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+    return String(n);
+  }
+
+  function truncate(s, n) {
+    if (!s) return "—";
+    s = String(s);
+    return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }
 
   function tagLabel(status, severity) {
@@ -717,7 +701,6 @@
       document.getElementById("last-poll-text").textContent =
         "Last refresh: " + fmtTimeAgo(snap.last_poll_at);
 
-      // Briefly flash to indicate update
       document.getElementById("monitors").classList.remove("updated-flash");
       void document.getElementById("monitors").offsetWidth;
       document.getElementById("monitors").classList.add("updated-flash");
@@ -741,7 +724,6 @@
     nextPollSeconds = Math.max(0, nextPollSeconds - 1);
   }
 
-  // Initial paint and ticker
   refresh();
   setInterval(refresh, REFRESH_MS);
   countdownTimer = setInterval(updateNextPollText, 1000);
