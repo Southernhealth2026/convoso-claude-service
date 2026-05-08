@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Operations · Southern Health</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Live Convoso operations terminal">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ----------------------------------------------------------------
+     Tokens
+     ---------------------------------------------------------------- */
+  :root {
+    --ink:        #0E2240;        /* deep navy */
+    --ink-soft:   #2C3E5C;
+    --ink-faint:  rgba(14, 34, 64, 0.55);
+    --paper:      #F5EFE3;        /* warm cream */
+    --paper-dim:  #EBE3D2;
+    --bone:       #FAF7F0;
+    --gold:       #B8924B;        /* muted antique gold */
+    --gold-soft:  #D4B97A;
+    --hairline:   rgba(14, 34, 64, 0.15);
+    --hairline-strong: rgba(14, 34, 64, 0.28);
+
+    --good:    #4A6E4A;
+    --good-bg: rgba(74, 110, 74, 0.08);
+    --warn:    #B8762B;
+    --warn-bg: rgba(184, 118, 43, 0.08);
+    --crit:    #8C2F2F;
+    --crit-bg: rgba(140, 47, 47, 0.08);
+    --info:    #3E5A7A;
+    --info-bg: rgba(62, 90, 122, 0.08);
+
+    --serif: 'Cormorant Garamond', 'Garamond', 'Times New Roman', serif;
+    --sans:  'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono:  'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-weight: 400;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(circle at 20% 0%, rgba(184, 146, 75, 0.08), transparent 50%),
+      radial-gradient(circle at 80% 100%, rgba(14, 34, 64, 0.04), transparent 60%);
+    min-height: 100vh;
+  }
+
+  /* Subtle paper grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.05  0 0 0 0 0.13  0 0 0 0 0.25  0 0 0 0.04 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    z-index: 1;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 2;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 56px 96px;
+  }
+
+  /* ----------------------------------------------------------------
+     Masthead
+     ---------------------------------------------------------------- */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 24px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--hairline-strong);
+  }
+
+  .brand-line {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 14px;
+  }
+
+  .masthead h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(38px, 5vw, 60px);
+    line-height: 1.0;
+    letter-spacing: -0.01em;
+    margin: 0;
+    font-feature-settings: "liga", "dlig";
+  }
+
+  .masthead h1 em {
+    font-style: italic;
+    font-weight: 500;
+    color: var(--gold);
+  }
+
+  .masthead .sub {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 17px;
+    color: var(--ink-soft);
+    margin-top: 8px;
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border: 1px solid var(--hairline-strong);
+    background: var(--bone);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    border-radius: 0;
+    white-space: nowrap;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 0 var(--good);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(74, 110, 74, 0.6); }
+    70%  { box-shadow: 0 0 0 10px rgba(74, 110, 74, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(74, 110, 74, 0); }
+  }
+  .status-pill.warn  .status-dot { background: var(--warn); animation-name: pulse-warn; }
+  .status-pill.crit  .status-dot { background: var(--crit); animation-name: pulse-crit; }
+  .status-pill.idle  .status-dot { background: var(--ink-faint); animation: none; }
+  @keyframes pulse-warn {
+    0% { box-shadow: 0 0 0 0 rgba(184, 118, 43, 0.6); }
+    70% { box-shadow: 0 0 0 10px rgba(184, 118, 43, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(184, 118, 43, 0); }
+  }
+  @keyframes pulse-crit {
+    0% { box-shadow: 0 0 0 0 rgba(140, 47, 47, 0.7); }
+    70% { box-shadow: 0 0 0 12px rgba(140, 47, 47, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(140, 47, 47, 0); }
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 22px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-faint);
+  }
+
+  /* ----------------------------------------------------------------
+     Section headers
+     ---------------------------------------------------------------- */
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin: 56px 0 24px;
+  }
+  .section-head .num {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 24px;
+    color: var(--gold);
+  }
+  .section-head h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 30px;
+    letter-spacing: -0.005em;
+    margin: 0;
+  }
+  .section-head .rule {
+    flex: 1;
+    height: 1px;
+    background: var(--hairline);
+    margin-bottom: 8px;
+  }
+
+  /* ----------------------------------------------------------------
+     Monitor cards grid
+     ---------------------------------------------------------------- */
+  .monitors {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border-top: 1px solid var(--hairline-strong);
+    border-left: 1px solid var(--hairline-strong);
+  }
+
+  .card {
+    background: var(--bone);
+    border-right: 1px solid var(--hairline-strong);
+    border-bottom: 1px solid var(--hairline-strong);
+    padding: 28px 28px 32px;
+    position: relative;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    transition: background 280ms ease;
+  }
+  .card:hover { background: #FCFAF4; }
+
+  .card.warn  { background: linear-gradient(180deg, var(--warn-bg), var(--bone) 60%); }
+  .card.crit  { background: linear-gradient(180deg, var(--crit-bg), var(--bone) 60%); }
+  .card.error { background: linear-gradient(180deg, var(--crit-bg), var(--bone) 60%); }
+  .card.setup { background: linear-gradient(180deg, var(--info-bg), var(--bone) 60%); }
+
+  .card .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .card h3 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    line-height: 1.15;
+    margin: 8px 0 18px;
+    letter-spacing: -0.005em;
+  }
+
+  .metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: auto;
+  }
+  .metric .big {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-feature-settings: "lnum", "tnum";
+  }
+  .metric .unit {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 22px;
+    color: var(--ink-soft);
+  }
+
+  .breakdown {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--hairline);
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .breakdown b {
+    color: var(--ink);
+    font-weight: 500;
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: normal;
+    text-transform: none;
+    margin-left: 6px;
+  }
+
+  .needs-setup-msg, .error-msg {
+    margin-top: auto;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+  .needs-setup-msg::before { content: "—  "; color: var(--info); }
+  .error-msg::before       { content: "—  "; color: var(--crit); }
+
+  .card-tag {
+    position: absolute;
+    top: 28px;
+    right: 28px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+  }
+  .card-tag.ok    { color: var(--good); }
+  .card-tag.warn  { color: var(--warn); }
+  .card-tag.crit  { color: var(--crit); }
+  .card-tag.info  { color: var(--info); }
+  .card-tag.idle  { color: var(--ink-faint); }
+
+  /* ----------------------------------------------------------------
+     Anomaly feed
+     ---------------------------------------------------------------- */
+  .feed {
+    border-top: 1px solid var(--hairline-strong);
+    border-bottom: 1px solid var(--hairline-strong);
+  }
+  .feed-row {
+    display: grid;
+    grid-template-columns: 110px 90px 1fr;
+    gap: 24px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--hairline);
+    align-items: baseline;
+  }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-row .when {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .feed-row .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 4px 0;
+    border: 1px solid currentColor;
+  }
+  .badge.warn  { color: var(--warn); }
+  .badge.crit  { color: var(--crit); }
+  .badge.info  { color: var(--info); }
+  .feed-row .body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .feed-row .title {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 19px;
+    line-height: 1.2;
+  }
+  .feed-row .detail {
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .feed-empty {
+    padding: 48px 0;
+    text-align: center;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 19px;
+    color: var(--ink-faint);
+  }
+
+  /* ----------------------------------------------------------------
+     Footer
+     ---------------------------------------------------------------- */
+  footer {
+    margin-top: 64px;
+    padding-top: 28px;
+    border-top: 1px solid var(--hairline);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  footer .ornament {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--gold);
+    letter-spacing: 0.5em;
+  }
+
+  /* ----------------------------------------------------------------
+     Loading / fade
+     ---------------------------------------------------------------- */
+  .fade-in {
+    animation: fadeIn 600ms ease both;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .updated-flash {
+    animation: flash 1200ms ease;
+  }
+  @keyframes flash {
+    0%   { background-color: rgba(184, 146, 75, 0.18); }
+    100% { background-color: transparent; }
+  }
+
+  /* ----------------------------------------------------------------
+     Responsive
+     ---------------------------------------------------------------- */
+  @media (max-width: 900px) {
+    .wrap { padding: 32px 24px 64px; }
+    .monitors { grid-template-columns: 1fr; }
+    .card { border-right: 1px solid var(--hairline-strong); }
+    .feed-row { grid-template-columns: 1fr; gap: 6px; }
+    .masthead { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ======================== Masthead ======================== -->
+  <header class="masthead fade-in">
+    <div>
+      <div class="brand-line">Southern Health · Operations Terminal</div>
+      <h1>The <em>Operations</em> Brief</h1>
+      <div class="sub">A live record of campaigns, pace, and dial conditions.</div>
+    </div>
+    <div>
+      <span id="status-pill" class="status-pill idle">
+        <span class="status-dot"></span>
+        <span id="status-label">Initializing</span>
+      </span>
+    </div>
+  </header>
+
+  <div class="meta-row">
+    <span id="last-poll-text">Last refresh: pending</span>
+    <span id="next-poll-text">Next refresh in 30s</span>
+  </div>
+
+  <!-- ======================== Monitors ======================== -->
+  <div class="section-head fade-in" style="animation-delay:80ms">
+    <span class="num">I.</span>
+    <h2>Live conditions</h2>
+    <span class="rule"></span>
+  </div>
+
+  <section class="monitors" id="monitors">
+    <!-- Cards rendered by JS -->
+    <article class="card" id="card-campaign_pauses">
+      <div class="eyebrow">Monitor 01</div>
+      <h3>Campaign continuity</h3>
+      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
+    </article>
+    <article class="card" id="card-drop_rate">
+      <div class="eyebrow">Monitor 02</div>
+      <h3>Drop rate</h3>
+      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
+    </article>
+    <article class="card" id="card-hopper">
+      <div class="eyebrow">Monitor 03</div>
+      <h3>Hopper depth</h3>
+      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
+    </article>
+  </section>
+
+  <!-- ======================== Anomaly Feed ======================== -->
+  <div class="section-head fade-in" style="animation-delay:160ms">
+    <span class="num">II.</span>
+    <h2>Detected anomalies</h2>
+    <span class="rule"></span>
+  </div>
+
+  <section class="feed" id="feed">
+    <div class="feed-empty">No anomalies on record.</div>
+  </section>
+
+  <!-- ======================== Footer ======================== -->
+  <footer>
+    <span>Southern Health · Operations</span>
+    <span class="ornament">· · ·</span>
+    <span id="version-text">v0.2 · Stage 1</span>
+  </footer>
+
+</div>
+
+<script>
+  /* --------------------------------------------------------------
+     Dashboard refresh logic
+     -------------------------------------------------------------- */
+  const REFRESH_MS = 30000;
+  let countdownTimer = null;
+  let nextPollSeconds = REFRESH_MS / 1000;
+
+  function fmtTimeAgo(iso) {
+    if (!iso) return "pending";
+    const t = new Date(iso).getTime();
+    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (sec < 5) return "just now";
+    if (sec < 60) return sec + "s ago";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + "m ago";
+    const hr = Math.floor(min / 60);
+    return hr + "h ago";
+  }
+
+  function fmtPct(n) {
+    if (n == null || isNaN(n)) return "—";
+    return (n * 100).toFixed(1) + "%";
+  }
+
+  function updateStatusPill(status, anomalies) {
+    const pill = document.getElementById("status-pill");
+    const label = document.getElementById("status-label");
+    pill.className = "status-pill";
+    const recentCrit = anomalies.find(a => a.severity === "critical");
+    const recentWarn = anomalies.find(a => a.severity === "warning");
+    if (status === "error" || recentCrit) {
+      pill.classList.add("crit");
+      label.textContent = recentCrit ? "Action required" : "Service degraded";
+    } else if (status === "partial" || recentWarn) {
+      pill.classList.add("warn");
+      label.textContent = "Attention recommended";
+    } else if (status === "ok") {
+      label.textContent = "All systems normal";
+    } else {
+      pill.classList.add("idle");
+      label.textContent = "Initializing";
+    }
+  }
+
+  function renderCampaignCard(monitor) {
+    const card = document.getElementById("card-campaign_pauses");
+    const tag = monitor.status === "ok" ? "ok"
+              : monitor.status === "needs_setup" ? "info"
+              : monitor.status === "error" ? "crit" : "idle";
+    let body;
+    if (monitor.status === "error") {
+      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
+    } else if (monitor.status === "needs_setup") {
+      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
+    } else if (monitor.data) {
+      const d = monitor.data;
+      body = `
+        <div class="metric">
+          <span class="big">${d.active}</span>
+          <span class="unit">active</span>
+        </div>
+        <div class="breakdown">
+          <span>Total<b>${d.total}</b></span>
+          <span>Paused<b>${d.paused}</b></span>
+        </div>`;
+    } else {
+      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
+    }
+    card.className = "card" + (monitor.status === "error" ? " error"
+                              : monitor.status === "needs_setup" ? " setup" : "");
+    card.innerHTML = `
+      <span class="card-tag ${tag}">${tagLabel(monitor.status)}</span>
+      <div class="eyebrow">Monitor 01</div>
+      <h3>Campaign continuity</h3>
+      ${body}
+    `;
+  }
+
+  function renderDropRateCard(monitor) {
+    const card = document.getElementById("card-drop_rate");
+    let body;
+    let cardClass = "card";
+    let tag = "idle";
+
+    if (monitor.status === "error") {
+      tag = "crit";
+      cardClass += " error";
+      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
+    } else if (monitor.status === "needs_setup") {
+      tag = "info";
+      cardClass += " setup";
+      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
+    } else if (monitor.data) {
+      const d = monitor.data;
+      const sev = d.severity || "ok";
+      tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
+      cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
+      body = `
+        <div class="metric">
+          <span class="big">${(d.rate * 100).toFixed(2)}</span>
+          <span class="unit">% drop</span>
+        </div>
+        <div class="breakdown">
+          <span>Drops<b>${d.drops}</b></span>
+          <span>Calls<b>${d.total_calls}</b></span>
+          <span>Threshold<b>${(d.warn_threshold * 100).toFixed(1)}%</b></span>
+        </div>`;
+    } else {
+      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
+    }
+
+    card.className = cardClass;
+    card.innerHTML = `
+      <span class="card-tag ${tag}">${tagLabel(monitor.status, monitor.data && monitor.data.severity)}</span>
+      <div class="eyebrow">Monitor 02</div>
+      <h3>Drop rate</h3>
+      ${body}
+    `;
+  }
+
+  function renderHopperCard(monitor) {
+    const card = document.getElementById("card-hopper");
+    let body;
+    let cardClass = "card";
+    let tag = "idle";
+
+    if (monitor.status === "error") {
+      tag = "crit";
+      cardClass += " error";
+      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
+    } else if (monitor.status === "needs_setup") {
+      tag = "info";
+      cardClass += " setup";
+      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
+    } else if (monitor.data && monitor.data.campaigns && monitor.data.campaigns.length) {
+      const camps = monitor.data.campaigns;
+      const lowest = [...camps].sort((a, b) => a.pct - b.pct)[0];
+      const sev = lowest.severity;
+      tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
+      cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
+      body = `
+        <div class="metric">
+          <span class="big">${(lowest.pct * 100).toFixed(0)}</span>
+          <span class="unit">% lowest</span>
+        </div>
+        <div class="breakdown">
+          <span>Campaign<b>${escapeHtml(lowest.campaign_name || "—")}</b></span>
+          <span>Remaining<b>${lowest.remaining}</b></span>
+        </div>`;
+    } else if (monitor.data) {
+      body = `<div class="needs-setup-msg">No active campaigns with hopper data.</div>`;
+    } else {
+      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
+    }
+
+    card.className = cardClass;
+    card.innerHTML = `
+      <span class="card-tag ${tag}">${tagLabel(monitor.status)}</span>
+      <div class="eyebrow">Monitor 03</div>
+      <h3>Hopper depth</h3>
+      ${body}
+    `;
+  }
+
+  function tagLabel(status, severity) {
+    if (status === "error") return "Error";
+    if (status === "needs_setup") return "Setup";
+    if (status === "pending") return "Idle";
+    if (severity === "critical") return "Critical";
+    if (severity === "warning") return "Warning";
+    return "Nominal";
+  }
+
+  function renderFeed(anomalies) {
+    const feed = document.getElementById("feed");
+    if (!anomalies || anomalies.length === 0) {
+      feed.innerHTML = `<div class="feed-empty">No anomalies on record.</div>`;
+      return;
+    }
+    feed.innerHTML = anomalies.map(a => {
+      const sevClass = a.severity === "critical" ? "crit"
+                     : a.severity === "warning" ? "warn"
+                     : "info";
+      return `
+        <div class="feed-row">
+          <span class="when">${fmtTimeAgo(a.ts)}</span>
+          <span class="badge ${sevClass}">${a.severity}</span>
+          <div class="body">
+            <span class="title">${escapeHtml(a.title)}</span>
+            <span class="detail">${escapeHtml(a.detail || "")}</span>
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s).replace(/[&<>"']/g, m => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[m]));
+  }
+
+  async function refresh() {
+    try {
+      const resp = await fetch("/api/state", { cache: "no-store" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const snap = await resp.json();
+
+      updateStatusPill(snap.last_poll_status, snap.anomalies || []);
+      renderCampaignCard(snap.monitors.campaign_pauses);
+      renderDropRateCard(snap.monitors.drop_rate);
+      renderHopperCard(snap.monitors.hopper);
+      renderFeed(snap.anomalies);
+
+      document.getElementById("last-poll-text").textContent =
+        "Last refresh: " + fmtTimeAgo(snap.last_poll_at);
+
+      // Briefly flash to indicate update
+      document.getElementById("monitors").classList.remove("updated-flash");
+      void document.getElementById("monitors").offsetWidth;
+      document.getElementById("monitors").classList.add("updated-flash");
+
+    } catch (err) {
+      const pill = document.getElementById("status-pill");
+      pill.className = "status-pill crit";
+      document.getElementById("status-label").textContent = "Connection lost";
+      console.error("Dashboard refresh failed:", err);
+    }
+    nextPollSeconds = REFRESH_MS / 1000;
+  }
+
+  function updateNextPollText() {
+    const t = document.getElementById("next-poll-text");
+    if (nextPollSeconds <= 0) {
+      t.textContent = "Refreshing…";
+    } else {
+      t.textContent = "Next refresh in " + nextPollSeconds + "s";
+    }
+    nextPollSeconds = Math.max(0, nextPollSeconds - 1);
+  }
+
+  // Initial paint and ticker
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+  countdownTimer = setInterval(updateNextPollText, 1000);
+</script>
+</body>
+</html>
