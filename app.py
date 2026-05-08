@@ -8,7 +8,7 @@ Phase 2: Monitors Convoso operations every 30 seconds, surfaces anomalies on
 
 Stage 1 monitors:
   - Campaign continuity     (via /campaigns/search)
-  - Drop rate spikes        (auto-discovered call-logs endpoint)
+  - Drop rate spikes        (via /agent-performance/search aggregated)
   - List depth (hopper)     (via /lists/search + /leads/search per list)
 """
 
@@ -49,12 +49,8 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 DROP_RATE_WARN_THRESHOLD = float(os.environ.get("DROP_RATE_WARN_THRESHOLD", "0.04"))
 DROP_RATE_CRIT_THRESHOLD = float(os.environ.get("DROP_RATE_CRIT_THRESHOLD", "0.06"))
 
-# Hopper - now measured in absolute lead counts per list, not percentage.
-# These are tunable via env vars.
 HOPPER_WARN_LEADS = int(os.environ.get("HOPPER_WARN_LEADS", "1000"))
 HOPPER_CRIT_LEADS = int(os.environ.get("HOPPER_CRIT_LEADS", "200"))
-
-DROP_RATE_WINDOW_MINUTES = int(os.environ.get("DROP_RATE_WINDOW_MINUTES", "60"))
 
 if not ANTHROPIC_API_KEY:
     log.warning("ANTHROPIC_API_KEY is not set!")
@@ -62,27 +58,6 @@ if not CONVOSO_AUTH_TOKEN:
     log.warning("CONVOSO_AUTH_TOKEN is not set!")
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-
-
-# ---------------------------------------------------------------------------
-# Endpoint cache
-#
-# Convoso path naming varies. We discover the working path once per process
-# and cache it so we don't pay the discovery cost every poll.
-# ---------------------------------------------------------------------------
-
-_endpoint_cache = {}        # logical_name -> path that worked
-_endpoint_cache_lock = threading.Lock()
-
-
-def cached_endpoint(name):
-    with _endpoint_cache_lock:
-        return _endpoint_cache.get(name)
-
-
-def remember_endpoint(name, path):
-    with _endpoint_cache_lock:
-        _endpoint_cache[name] = path
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +117,6 @@ class ConvosoAPIError(Exception):
 
 
 def convoso_post(path, payload=None, timeout=20, raise_on_html=True):
-    """POST to Convoso. Returns parsed JSON body. Raises ConvosoAPIError on
-    transport / non-JSON failures."""
     if not CONVOSO_AUTH_TOKEN:
         raise ConvosoAPIError("CONVOSO_AUTH_TOKEN is not configured")
     url = f"{CONVOSO_API_BASE}{path}"
@@ -161,24 +134,6 @@ def convoso_post(path, payload=None, timeout=20, raise_on_html=True):
         return resp.json()
     except ValueError:
         raise ConvosoAPIError(f"Convoso returned non-JSON for {path}: {text[:200]}")
-
-
-def discover_endpoint(logical_name, candidates, probe_payload):
-    """Try each candidate path until one returns success=True.
-    Cache the winner. Returns the working path or None."""
-    cached = cached_endpoint(logical_name)
-    if cached:
-        return cached
-    for path in candidates:
-        try:
-            body = convoso_post(path, probe_payload)
-        except ConvosoAPIError:
-            continue
-        if body.get("success") is True:
-            remember_endpoint(logical_name, path)
-            log.info("Discovered %s endpoint: %s", logical_name, path)
-            return path
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +274,6 @@ def update_convoso_lead_notes(lead_id, notes):
 # ---------------------------------------------------------------------------
 
 def is_active_status(status_val):
-    """Convoso encodes active as 'Y' or 'N' for lists. Sometimes it's a bool
-    for other entities."""
     if status_val is True:
         return True
     if status_val is False:
@@ -399,91 +352,133 @@ def monitor_campaign_pauses():
     })
 
 
-# ---- Drop rate ----
+# ---- Drop rate via /agent-performance/search ----
+#
+# /agent-performance/search returns:
+#   { "success": true, "code": 200, "total": 20, "data": { "<agent_id>": {...stats...}, ... } }
+#
+# Each agent's stat block contains aggregated call counters. We sum the drop-like
+# counter across all agents and divide by sum of total calls.
+#
+# We don't know the exact field names for "drops" and "total calls" in the response
+# (they vary by Convoso build), so we try several common names.
 
-CALL_LOG_PATH_CANDIDATES = [
-    "/call-logs/search",
-    "/call-log/search",
-    "/log/search",
-    "/calls/search",
-    "/call/search",
-    "/calllog/search",
+DROP_FIELD_CANDIDATES = [
+    "drops", "drop", "dropped_calls", "dropped",
+    "abandons", "abandoned", "abandoned_calls", "abandon_calls",
+    "drops_count", "drop_count",
+]
+TOTAL_FIELD_CANDIDATES = [
+    "total_calls", "calls", "calls_count", "call_count",
+    "calls_made", "calls_taken", "calls_handled",
+    "outbound_calls", "answered_calls",
 ]
 
 
-def get_call_logs_path():
-    """Discover the working call-logs path for this account.
-    Probe with a tiny payload to be cheap."""
-    return discover_endpoint(
-        "call_logs",
-        CALL_LOG_PATH_CANDIDATES,
-        {"limit": 1, "offset": 0},
-    )
+def _to_number(v):
+    """Coerce a value to a float, return None if not numeric."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
-def fetch_call_logs_count(start_time, end_time, status=None):
-    path = get_call_logs_path()
-    if path is None:
-        raise ConvosoAPIError(
-            "Could not find a working call-logs endpoint. Tried: "
-            + ", ".join(CALL_LOG_PATH_CANDIDATES)
-            + ". Your Convoso API token may not have call-logs permission."
-        )
-
-    payload = {
-        "start_time": start_time,
-        "end_time": end_time,
-        "limit": 500,
-        "offset": 0,
-    }
-    if status:
-        payload["status"] = status
-    body = convoso_post(path, payload)
+def fetch_agent_performance():
+    body = convoso_post("/agent-performance/search", {})
     if not body.get("success"):
         raise ConvosoAPIError(
-            f"{path} failed: code={body.get('code')} text={body.get('text')}"
+            f"agent-performance/search failed: code={body.get('code')} text={body.get('text')}"
         )
-    total = body.get("total")
-    if total is not None:
-        try:
-            return int(total)
-        except (TypeError, ValueError):
-            pass
     data = body.get("data") or {}
-    if isinstance(data, dict):
-        entries = data.get("entries") or list(data.values())
-    elif isinstance(data, list):
-        entries = data
-    else:
-        entries = []
-    return len(entries)
+    if not isinstance(data, dict):
+        raise ConvosoAPIError(
+            f"agent-performance returned unexpected data shape: {type(data).__name__}"
+        )
+    return data    # {agent_id: {stats}}
 
 
 def monitor_drop_rate():
-    now = datetime.utcnow()
-    start = now - timedelta(minutes=DROP_RATE_WINDOW_MINUTES)
-    fmt = "%Y-%m-%d %H:%M:%S"
-    start_s = start.strftime(fmt)
-    end_s = now.strftime(fmt)
-
     try:
-        drops = fetch_call_logs_count(start_s, end_s, status="DROP")
-        total = fetch_call_logs_count(start_s, end_s, status=None)
+        agents = fetch_agent_performance()
     except ConvosoAPIError as e:
-        state.update_monitor("drop_rate", "needs_setup", error=str(e))
+        state.update_monitor("drop_rate", "error", error=str(e))
         return
 
-    if total == 0:
+    if not agents:
         state.update_monitor("drop_rate", "ok", data={
             "rate": 0.0, "drops": 0, "total_calls": 0,
             "warn_threshold": DROP_RATE_WARN_THRESHOLD,
             "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
-            "severity": "ok", "window_minutes": DROP_RATE_WINDOW_MINUTES,
-            "note": "No calls in the look-back window.",
+            "severity": "ok",
+            "note": "No agents in the response.",
         })
         return
 
-    rate = float(drops) / float(total)
+    # Discover which fields are present in the first non-empty agent record.
+    sample_agent = None
+    for v in agents.values():
+        if isinstance(v, dict) and v:
+            sample_agent = v
+            break
+
+    if sample_agent is None:
+        state.update_monitor("drop_rate", "needs_setup", error=(
+            "agent-performance returned but no agent records had usable fields."
+        ))
+        return
+
+    drop_field = None
+    total_field = None
+    for k in DROP_FIELD_CANDIDATES:
+        if k in sample_agent:
+            drop_field = k
+            break
+    for k in TOTAL_FIELD_CANDIDATES:
+        if k in sample_agent:
+            total_field = k
+            break
+
+    if drop_field is None or total_field is None:
+        # Surface what fields ARE there so we can map them
+        sample_keys = list(sample_agent.keys())
+        state.update_monitor("drop_rate", "needs_setup", error=(
+            f"Drop rate could not be computed. Looking for drop field "
+            f"({DROP_FIELD_CANDIDATES[0]} etc.) and total-calls field "
+            f"({TOTAL_FIELD_CANDIDATES[0]} etc.) but none were found. "
+            f"Available agent fields: {sample_keys[:30]}"
+        ))
+        return
+
+    total_drops = 0.0
+    total_calls = 0.0
+    agents_counted = 0
+
+    for agent_id, stats in agents.items():
+        if not isinstance(stats, dict):
+            continue
+        d = _to_number(stats.get(drop_field))
+        t = _to_number(stats.get(total_field))
+        if d is None or t is None:
+            continue
+        total_drops += d
+        total_calls += t
+        agents_counted += 1
+
+    if total_calls == 0:
+        state.update_monitor("drop_rate", "ok", data={
+            "rate": 0.0, "drops": 0, "total_calls": 0,
+            "warn_threshold": DROP_RATE_WARN_THRESHOLD,
+            "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
+            "severity": "ok",
+            "agents_counted": agents_counted,
+            "drop_field": drop_field, "total_field": total_field,
+            "note": "No calls reported by any agent today.",
+        })
+        return
+
+    rate = total_drops / total_calls
     severity = "ok"
     if rate >= DROP_RATE_CRIT_THRESHOLD:
         severity = "critical"
@@ -494,16 +489,20 @@ def monitor_drop_rate():
         state.add_anomaly(
             severity=severity, monitor="drop_rate",
             title=f"Drop rate at {rate*100:.2f}%",
-            detail=f"{drops} drops out of {total} calls in last {DROP_RATE_WINDOW_MINUTES}m.",
+            detail=f"{int(total_drops)} drops out of {int(total_calls)} calls across {agents_counted} agents.",
             fingerprint=f"drop_rate:{severity}",
         )
 
     state.update_monitor("drop_rate", "ok", data={
-        "rate": rate, "drops": drops, "total_calls": total,
+        "rate": rate,
+        "drops": int(total_drops),
+        "total_calls": int(total_calls),
         "warn_threshold": DROP_RATE_WARN_THRESHOLD,
         "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
         "severity": severity,
-        "window_minutes": DROP_RATE_WINDOW_MINUTES,
+        "agents_counted": agents_counted,
+        "drop_field": drop_field,
+        "total_field": total_field,
     })
 
 
@@ -523,8 +522,6 @@ def fetch_lists():
 
 
 def count_leads_in_list(list_id):
-    """Get total leads in a list via /leads/search with limit=1, look at the
-    'total' field."""
     body = convoso_post("/leads/search", {
         "list_id": list_id, "limit": 1, "offset": 0,
     })
@@ -539,7 +536,6 @@ def count_leads_in_list(list_id):
             return int(total)
         except (TypeError, ValueError):
             pass
-    # Some Convoso responses put total inside data
     data = body.get("data") or {}
     if isinstance(data, dict):
         for key in ("total", "total_count", "count"):
@@ -548,7 +544,6 @@ def count_leads_in_list(list_id):
                     return int(data[key])
                 except (TypeError, ValueError):
                     pass
-        # Last resort: count entries (capped at limit, so not accurate)
         entries = data.get("entries") or []
         return len(entries)
     if isinstance(data, list):
@@ -563,7 +558,6 @@ def monitor_hopper_depletion():
         state.update_monitor("hopper", "error", error=str(e))
         return
 
-    # Filter to active lists only (status == "Y")
     active_lists = [
         L for L in lists
         if isinstance(L, dict) and is_active_status(L.get("status"))
@@ -580,7 +574,6 @@ def monitor_hopper_depletion():
 
     summaries = []
     errors_per_list = []
-    # To keep poll cycle fast, cap how many lists we check per cycle
     max_lists_per_poll = int(os.environ.get("HOPPER_MAX_LISTS_PER_POLL", "20"))
     checked = active_lists[:max_lists_per_poll]
 
@@ -649,7 +642,6 @@ def run_all_monitors():
             log.exception("Monitor %s crashed", name)
             state.update_monitor(name, "error", error=f"Crash: {e}")
             statuses.append("error")
-
     if all(s == "ok" for s in statuses):
         overall = "ok"
     elif any(s == "ok" for s in statuses):
@@ -751,18 +743,11 @@ def api_diagnose():
         ("/lists/search",              {"limit": 1, "offset": 0}),
         ("/leads/search",              {"limit": 1, "offset": 0}),
         ("/users/search",              {"limit": 1, "offset": 0}),
-        ("/call-logs/search",          {"limit": 1, "offset": 0}),
-        ("/call-log/search",           {"limit": 1, "offset": 0}),
-        ("/log/search",                {"limit": 1, "offset": 0}),
-        ("/calls/search",              {"limit": 1, "offset": 0}),
         ("/agent-performance/search",  {}),
         ("/agent-productivity/search", {"limit": 1, "offset": 0}),
         ("/agent-monitor/search",      {}),
-        ("/queues/search",             {"limit": 1, "offset": 0}),
-        ("/dnc/search",                {"limit": 1, "offset": 0}),
-        ("/statuses/search",           {"limit": 1, "offset": 0}),
         ("/callbacks/search",          {"limit": 1, "offset": 0}),
-        ("/revenue/search",            {"limit": 1, "offset": 0}),
+        ("/dnc/search",                {"limit": 1, "offset": 0}),
     ]
     results = {}
     for path, payload in paths_to_test:
@@ -786,7 +771,7 @@ def api_diagnose():
 
 @app.route("/api/probe", methods=["GET"])
 def api_probe():
-    """?path=/leads/search to inspect what fields come back."""
+    """?path=/agent-performance/search to inspect what fields come back."""
     path = request.args.get("path")
     if not path:
         return jsonify({"error": "Pass ?path=/some/endpoint"}), 400
@@ -794,7 +779,7 @@ def api_probe():
         path = "/" + path
     extra = {}
     for k in ("list_id", "campaign_id", "limit", "offset", "status",
-              "start_time", "end_time"):
+              "start_time", "end_time", "agent_emails"):
         v = request.args.get(k)
         if v is not None:
             extra[k] = v
