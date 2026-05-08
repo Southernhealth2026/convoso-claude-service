@@ -7,9 +7,9 @@ Phase 2: Monitors Convoso operations every 30 seconds, surfaces anomalies on
          a live dashboard at /dashboard.
 
 Stage 1 monitors:
-  - Campaign pauses     (via /campaigns/search)
-  - Drop rate spikes    (via /call-logs/search, counting status=DROP)
-  - Hopper / list depth (via /lists/search)
+  - Campaign continuity     (via /campaigns/search)
+  - Drop rate spikes        (auto-discovered call-logs endpoint)
+  - List depth (hopper)     (via /lists/search + /leads/search per list)
 """
 
 import json
@@ -49,10 +49,11 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 DROP_RATE_WARN_THRESHOLD = float(os.environ.get("DROP_RATE_WARN_THRESHOLD", "0.04"))
 DROP_RATE_CRIT_THRESHOLD = float(os.environ.get("DROP_RATE_CRIT_THRESHOLD", "0.06"))
 
-HOPPER_WARN_PCT = float(os.environ.get("HOPPER_WARN_PCT", "0.20"))
-HOPPER_CRIT_PCT = float(os.environ.get("HOPPER_CRIT_PCT", "0.05"))
+# Hopper - now measured in absolute lead counts per list, not percentage.
+# These are tunable via env vars.
+HOPPER_WARN_LEADS = int(os.environ.get("HOPPER_WARN_LEADS", "1000"))
+HOPPER_CRIT_LEADS = int(os.environ.get("HOPPER_CRIT_LEADS", "200"))
 
-# Drop rate look-back window in minutes
 DROP_RATE_WINDOW_MINUTES = int(os.environ.get("DROP_RATE_WINDOW_MINUTES", "60"))
 
 if not ANTHROPIC_API_KEY:
@@ -64,7 +65,28 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY els
 
 
 # ---------------------------------------------------------------------------
-# In-memory state store
+# Endpoint cache
+#
+# Convoso path naming varies. We discover the working path once per process
+# and cache it so we don't pay the discovery cost every poll.
+# ---------------------------------------------------------------------------
+
+_endpoint_cache = {}        # logical_name -> path that worked
+_endpoint_cache_lock = threading.Lock()
+
+
+def cached_endpoint(name):
+    with _endpoint_cache_lock:
+        return _endpoint_cache.get(name)
+
+
+def remember_endpoint(name, path):
+    with _endpoint_cache_lock:
+        _endpoint_cache[name] = path
+
+
+# ---------------------------------------------------------------------------
+# State store
 # ---------------------------------------------------------------------------
 
 class StateStore:
@@ -93,13 +115,9 @@ class StateStore:
                     if a.get("fingerprint") == fingerprint and a.get("ts_epoch", 0) > cutoff:
                         return
             self.anomalies.appendleft({
-                "ts": now,
-                "ts_epoch": time.time(),
-                "severity": severity,
-                "monitor": monitor,
-                "title": title,
-                "detail": detail,
-                "fingerprint": fingerprint,
+                "ts": now, "ts_epoch": time.time(),
+                "severity": severity, "monitor": monitor,
+                "title": title, "detail": detail, "fingerprint": fingerprint,
             })
 
     def snapshot(self):
@@ -123,7 +141,9 @@ class ConvosoAPIError(Exception):
     pass
 
 
-def convoso_post(path, payload=None, timeout=20):
+def convoso_post(path, payload=None, timeout=20, raise_on_html=True):
+    """POST to Convoso. Returns parsed JSON body. Raises ConvosoAPIError on
+    transport / non-JSON failures."""
     if not CONVOSO_AUTH_TOKEN:
         raise ConvosoAPIError("CONVOSO_AUTH_TOKEN is not configured")
     url = f"{CONVOSO_API_BASE}{path}"
@@ -134,10 +154,31 @@ def convoso_post(path, payload=None, timeout=20):
         resp = requests.post(url, data=body, timeout=timeout)
     except requests.RequestException as e:
         raise ConvosoAPIError(f"Network error to {path}: {e}")
+    text = resp.text
+    if raise_on_html and (text.lstrip().startswith("<") or "<!DOCTYPE" in text[:200]):
+        raise ConvosoAPIError(f"Convoso returned HTML (probably 404) for {path}")
     try:
         return resp.json()
     except ValueError:
-        raise ConvosoAPIError(f"Convoso returned non-JSON for {path}: {resp.text[:200]}")
+        raise ConvosoAPIError(f"Convoso returned non-JSON for {path}: {text[:200]}")
+
+
+def discover_endpoint(logical_name, candidates, probe_payload):
+    """Try each candidate path until one returns success=True.
+    Cache the winner. Returns the working path or None."""
+    cached = cached_endpoint(logical_name)
+    if cached:
+        return cached
+    for path in candidates:
+        try:
+            body = convoso_post(path, probe_payload)
+        except ConvosoAPIError:
+            continue
+        if body.get("success") is True:
+            remember_endpoint(logical_name, path)
+            log.info("Discovered %s endpoint: %s", logical_name, path)
+            return path
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +188,11 @@ def convoso_post(path, payload=None, timeout=20):
 def parse_convoso_payload(req):
     content_type = (req.content_type or "").lower()
     raw_body = req.get_data(as_text=True)
-
     if "application/json" in content_type:
         try:
             return req.get_json(force=True, silent=False)
         except Exception:
             pass
-
     if "application/x-www-form-urlencoded" in content_type or "=" in raw_body:
         decoded = urllib.parse.unquote_plus(raw_body)
         candidate = decoded.rstrip("=").strip()
@@ -172,14 +211,12 @@ def parse_convoso_payload(req):
                     except json.JSONDecodeError:
                         pass
             return form_data
-
     stripped = raw_body.strip().rstrip("=")
     if stripped.startswith("{"):
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
             pass
-
     raise ValueError(f"Could not parse payload. Body: {raw_body[:300]}")
 
 
@@ -195,7 +232,6 @@ def lookup_lead_id_by_phone(phone_number):
         raise ValueError("Cannot lookup - phone number is empty")
     if len(phone_digits) == 11 and phone_digits.startswith("1"):
         phone_digits = phone_digits[1:]
-
     body = convoso_post("/leads/search", {
         "phone_number": phone_digits, "limit": 5, "offset": 0,
     })
@@ -282,8 +318,20 @@ def update_convoso_lead_notes(lead_id, notes):
 # Phase 2: monitors
 # ---------------------------------------------------------------------------
 
+def is_active_status(status_val):
+    """Convoso encodes active as 'Y' or 'N' for lists. Sometimes it's a bool
+    for other entities."""
+    if status_val is True:
+        return True
+    if status_val is False:
+        return False
+    if status_val is None:
+        return False
+    s = str(status_val).strip().lower()
+    return s in ("y", "yes", "1", "true", "active", "running")
+
+
 def fetch_campaigns():
-    """Fetch the campaign list. Verified to work via /campaigns/search."""
     body = convoso_post("/campaigns/search", {"limit": 200, "offset": 0})
     if not body.get("success"):
         raise ConvosoAPIError(
@@ -291,10 +339,8 @@ def fetch_campaigns():
         )
     data = body.get("data") or {}
     if isinstance(data, dict):
-        # Convoso usually wraps in {"entries": [...]} but we tolerate flat dict too
         entries = data.get("entries")
         if entries is None:
-            # data is a dict keyed by id - take its values
             entries = list(data.values())
     elif isinstance(data, list):
         entries = data
@@ -318,9 +364,10 @@ def monitor_campaign_pauses():
         if active is None:
             active = c.get("is_active")
         if active is None:
-            status_val = str(c.get("status") or "").lower()
-            active = status_val in ("active", "1", "true", "running")
-        summary.append({"id": cid, "name": name, "active": bool(active)})
+            active = is_active_status(c.get("status"))
+        else:
+            active = bool(active)
+        summary.append({"id": cid, "name": name, "active": active})
 
     prev = state.previous.get("campaign_pauses") or {}
     prev_by_id = {c["id"]: c for c in prev.get("campaigns", [])}
@@ -352,35 +399,56 @@ def monitor_campaign_pauses():
     })
 
 
-def fetch_call_logs_count(start_time, end_time, status=None):
-    """Query /call-logs/search and return (count_in_window, raw_response_total).
+# ---- Drop rate ----
 
-    Convoso may return a 'total' field in the envelope. If it does we use that.
-    Otherwise we count returned entries (capped at limit). For accurate counts
-    we set limit=500 (the max Convoso allows).
-    """
+CALL_LOG_PATH_CANDIDATES = [
+    "/call-logs/search",
+    "/call-log/search",
+    "/log/search",
+    "/calls/search",
+    "/call/search",
+    "/calllog/search",
+]
+
+
+def get_call_logs_path():
+    """Discover the working call-logs path for this account.
+    Probe with a tiny payload to be cheap."""
+    return discover_endpoint(
+        "call_logs",
+        CALL_LOG_PATH_CANDIDATES,
+        {"limit": 1, "offset": 0},
+    )
+
+
+def fetch_call_logs_count(start_time, end_time, status=None):
+    path = get_call_logs_path()
+    if path is None:
+        raise ConvosoAPIError(
+            "Could not find a working call-logs endpoint. Tried: "
+            + ", ".join(CALL_LOG_PATH_CANDIDATES)
+            + ". Your Convoso API token may not have call-logs permission."
+        )
+
     payload = {
         "start_time": start_time,
         "end_time": end_time,
         "limit": 500,
         "offset": 0,
-        "order": "DESC",
     }
     if status:
         payload["status"] = status
-    body = convoso_post("/call-logs/search", payload)
+    body = convoso_post(path, payload)
     if not body.get("success"):
         raise ConvosoAPIError(
-            f"call-logs/search failed: code={body.get('code')} text={body.get('text')}"
+            f"{path} failed: code={body.get('code')} text={body.get('text')}"
         )
-    # Try a top-level 'total' first
     total = body.get("total")
     if total is not None:
         try:
             return int(total)
         except (TypeError, ValueError):
             pass
-    # Fall back to counting entries in data
     data = body.get("data") or {}
     if isinstance(data, dict):
         entries = data.get("entries") or list(data.values())
@@ -392,14 +460,7 @@ def fetch_call_logs_count(start_time, end_time, status=None):
 
 
 def monitor_drop_rate():
-    """Compute drop rate for the last DROP_RATE_WINDOW_MINUTES.
-
-    Strategy: query call-logs twice -
-      1. with status=DROP -> drop count
-      2. without status filter -> total count
-    Convoso uses 24h server time format 'YYYY-MM-DD HH:MM:SS'.
-    """
-    now = datetime.utcnow()    # Convoso assumes server-local; UTC is safe enough for ratios
+    now = datetime.utcnow()
     start = now - timedelta(minutes=DROP_RATE_WINDOW_MINUTES)
     fmt = "%Y-%m-%d %H:%M:%S"
     start_s = start.strftime(fmt)
@@ -409,18 +470,15 @@ def monitor_drop_rate():
         drops = fetch_call_logs_count(start_s, end_s, status="DROP")
         total = fetch_call_logs_count(start_s, end_s, status=None)
     except ConvosoAPIError as e:
-        state.update_monitor("drop_rate", "error", error=str(e))
+        state.update_monitor("drop_rate", "needs_setup", error=str(e))
         return
 
     if total == 0:
         state.update_monitor("drop_rate", "ok", data={
-            "rate": 0.0,
-            "drops": 0,
-            "total_calls": 0,
+            "rate": 0.0, "drops": 0, "total_calls": 0,
             "warn_threshold": DROP_RATE_WARN_THRESHOLD,
             "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
-            "severity": "ok",
-            "window_minutes": DROP_RATE_WINDOW_MINUTES,
+            "severity": "ok", "window_minutes": DROP_RATE_WINDOW_MINUTES,
             "note": "No calls in the look-back window.",
         })
         return
@@ -441,9 +499,7 @@ def monitor_drop_rate():
         )
 
     state.update_monitor("drop_rate", "ok", data={
-        "rate": rate,
-        "drops": drops,
-        "total_calls": total,
+        "rate": rate, "drops": drops, "total_calls": total,
         "warn_threshold": DROP_RATE_WARN_THRESHOLD,
         "crit_threshold": DROP_RATE_CRIT_THRESHOLD,
         "severity": severity,
@@ -451,40 +507,53 @@ def monitor_drop_rate():
     })
 
 
+# ---- Hopper / list depth ----
+
 def fetch_lists():
-    body = convoso_post("/lists/search", {"limit": 200, "offset": 0})
+    body = convoso_post("/lists/search", {"limit": 500, "offset": 0})
     if not body.get("success"):
         raise ConvosoAPIError(
             f"lists/search failed: code={body.get('code')} text={body.get('text')}"
         )
+    data = body.get("data") or []
+    if isinstance(data, dict):
+        entries = data.get("entries") or list(data.values())
+        return entries
+    return data
+
+
+def count_leads_in_list(list_id):
+    """Get total leads in a list via /leads/search with limit=1, look at the
+    'total' field."""
+    body = convoso_post("/leads/search", {
+        "list_id": list_id, "limit": 1, "offset": 0,
+    })
+    if not body.get("success"):
+        raise ConvosoAPIError(
+            f"leads/search failed for list {list_id}: "
+            f"code={body.get('code')} text={body.get('text')}"
+        )
+    total = body.get("total")
+    if total is not None:
+        try:
+            return int(total)
+        except (TypeError, ValueError):
+            pass
+    # Some Convoso responses put total inside data
     data = body.get("data") or {}
     if isinstance(data, dict):
-        entries = data.get("entries")
-        if entries is None:
-            entries = list(data.values())
-    elif isinstance(data, list):
-        entries = data
-    else:
-        entries = []
-    return entries
-
-
-# Field names Convoso may use for "leads available to dial" and "total leads"
-REMAINING_FIELD_NAMES = [
-    "leads_remaining", "remaining", "available", "available_leads",
-    "leads_available", "hopper_count", "active_leads", "callable_leads",
-]
-TOTAL_FIELD_NAMES = [
-    "leads_total", "total_leads", "total", "list_size", "lead_count",
-    "size", "count",
-]
-
-
-def first_present(d, keys):
-    for k in keys:
-        if k in d and d[k] is not None:
-            return d[k], k
-    return None, None
+        for key in ("total", "total_count", "count"):
+            if key in data:
+                try:
+                    return int(data[key])
+                except (TypeError, ValueError):
+                    pass
+        # Last resort: count entries (capped at limit, so not accurate)
+        entries = data.get("entries") or []
+        return len(entries)
+    if isinstance(data, list):
+        return len(data)
+    return 0
 
 
 def monitor_hopper_depletion():
@@ -494,82 +563,69 @@ def monitor_hopper_depletion():
         state.update_monitor("hopper", "error", error=str(e))
         return
 
-    if not lists:
+    # Filter to active lists only (status == "Y")
+    active_lists = [
+        L for L in lists
+        if isinstance(L, dict) and is_active_status(L.get("status"))
+    ]
+
+    if not active_lists:
         state.update_monitor("hopper", "ok", data={
             "lists": [],
-            "note": "No lists returned.",
+            "warn_threshold": HOPPER_WARN_LEADS,
+            "crit_threshold": HOPPER_CRIT_LEADS,
+            "note": "No active lists.",
         })
         return
 
-    hopper_summary = []
-    used_remaining_field = None
-    used_total_field = None
+    summaries = []
+    errors_per_list = []
+    # To keep poll cycle fast, cap how many lists we check per cycle
+    max_lists_per_poll = int(os.environ.get("HOPPER_MAX_LISTS_PER_POLL", "20"))
+    checked = active_lists[:max_lists_per_poll]
 
-    for L in lists:
-        if not isinstance(L, dict):
-            continue
-
-        # Skip inactive lists if the field is present and false
-        active = L.get("active") if "active" in L else L.get("is_active", True)
-        if active is False:
-            continue
-
-        list_id = L.get("id") or L.get("list_id")
-        list_name = L.get("name") or L.get("list_name") or f"List {list_id}"
-
-        remaining_val, remaining_field = first_present(L, REMAINING_FIELD_NAMES)
-        total_val, total_field = first_present(L, TOTAL_FIELD_NAMES)
-
-        if remaining_val is None or total_val is None:
-            continue
-
-        used_remaining_field = used_remaining_field or remaining_field
-        used_total_field = used_total_field or total_field
-
+    for L in checked:
+        list_id = L.get("id")
+        list_name = L.get("name") or f"List {list_id}"
         try:
-            remaining = float(remaining_val)
-            total = float(total_val)
-        except (TypeError, ValueError):
+            total = count_leads_in_list(list_id)
+        except ConvosoAPIError as e:
+            errors_per_list.append((list_name, str(e)))
             continue
 
-        pct = (remaining / total) if total > 0 else 0.0
         severity = "ok"
-        if pct <= HOPPER_CRIT_PCT:
+        if total <= HOPPER_CRIT_LEADS:
             severity = "critical"
-        elif pct <= HOPPER_WARN_PCT:
+        elif total <= HOPPER_WARN_LEADS:
             severity = "warning"
 
         if severity in ("warning", "critical"):
             state.add_anomaly(
                 severity=severity, monitor="hopper",
                 title=f"List depleting: {list_name}",
-                detail=f"{int(remaining)} of {int(total)} leads remaining ({pct*100:.1f}%).",
+                detail=f"{total} leads remain in active list (id {list_id}).",
                 fingerprint=f"hopper:{list_id}:{severity}",
             )
 
-        hopper_summary.append({
+        summaries.append({
             "list_id": list_id,
             "list_name": list_name,
-            "remaining": int(remaining),
-            "total": int(total),
-            "pct": pct,
+            "remaining": total,
             "severity": severity,
         })
 
-    if not hopper_summary:
-        # We got lists back but none had recognizable count fields.
-        # Surface a few sample keys so we can patch the field-name list.
-        sample_keys = list(lists[0].keys()) if isinstance(lists[0], dict) else []
-        state.update_monitor("hopper", "needs_setup", error=(
-            "Lists returned but no recognizable lead-count fields. "
-            f"Sample list keys: {sample_keys[:30]}"
+    if not summaries and errors_per_list:
+        state.update_monitor("hopper", "error", error=(
+            f"Could not count leads. First error: {errors_per_list[0][1]}"
         ))
         return
 
     state.update_monitor("hopper", "ok", data={
-        "lists": hopper_summary,
-        "remaining_field": used_remaining_field,
-        "total_field": used_total_field,
+        "lists": summaries,
+        "warn_threshold": HOPPER_WARN_LEADS,
+        "crit_threshold": HOPPER_CRIT_LEADS,
+        "active_total": len(active_lists),
+        "checked": len(checked),
     })
 
 
@@ -600,7 +656,6 @@ def run_all_monitors():
         overall = "partial"
     else:
         overall = "error"
-
     state.last_poll_at = datetime.now(timezone.utc).isoformat()
     state.last_poll_status = overall
     log.info("Poll finished in %.2fs status=%s", time.time() - started, overall)
@@ -657,19 +712,16 @@ def webhook():
     except ValueError as e:
         log.error("Payload parse failed: %s", e)
         return jsonify({"ok": False, "error": "bad_payload", "detail": str(e)}), 400
-
     try:
         lead_id = resolve_lead_id(call_data)
     except Exception as e:
         log.exception("Could not resolve lead_id")
         return jsonify({"ok": False, "error": "lead_id_unresolvable", "detail": str(e)}), 400
-
     try:
         summary = generate_summary(call_data)
     except Exception as e:
         log.exception("Claude call failed")
         return jsonify({"ok": False, "error": "claude_failed", "detail": str(e)}), 500
-
     try:
         result = update_convoso_lead_notes(lead_id, summary)
     except Exception as e:
@@ -678,7 +730,6 @@ def webhook():
             "ok": False, "error": "convoso_update_failed", "detail": str(e),
             "summary_that_would_have_been_saved": summary,
         }), 500
-
     return jsonify({"ok": True, "lead_id": lead_id, "summary": summary,
                     "convoso_response": result})
 
@@ -698,14 +749,20 @@ def api_diagnose():
     paths_to_test = [
         ("/campaigns/search",          {"limit": 1, "offset": 0}),
         ("/lists/search",              {"limit": 1, "offset": 0}),
+        ("/leads/search",              {"limit": 1, "offset": 0}),
         ("/users/search",              {"limit": 1, "offset": 0}),
         ("/call-logs/search",          {"limit": 1, "offset": 0}),
+        ("/call-log/search",           {"limit": 1, "offset": 0}),
+        ("/log/search",                {"limit": 1, "offset": 0}),
+        ("/calls/search",              {"limit": 1, "offset": 0}),
         ("/agent-performance/search",  {}),
         ("/agent-productivity/search", {"limit": 1, "offset": 0}),
         ("/agent-monitor/search",      {}),
         ("/queues/search",             {"limit": 1, "offset": 0}),
         ("/dnc/search",                {"limit": 1, "offset": 0}),
         ("/statuses/search",           {"limit": 1, "offset": 0}),
+        ("/callbacks/search",          {"limit": 1, "offset": 0}),
+        ("/revenue/search",            {"limit": 1, "offset": 0}),
     ]
     results = {}
     for path, payload in paths_to_test:
@@ -729,18 +786,24 @@ def api_diagnose():
 
 @app.route("/api/probe", methods=["GET"])
 def api_probe():
-    """Probe a single Convoso endpoint and return the raw JSON.
-
-    Use ?path=/lists/search to inspect what fields come back.
-    Useful when monitors say 'needs_setup' so we can map field names.
-    """
+    """?path=/leads/search to inspect what fields come back."""
     path = request.args.get("path")
     if not path:
         return jsonify({"error": "Pass ?path=/some/endpoint"}), 400
     if not path.startswith("/"):
         path = "/" + path
+    extra = {}
+    for k in ("list_id", "campaign_id", "limit", "offset", "status",
+              "start_time", "end_time"):
+        v = request.args.get(k)
+        if v is not None:
+            extra[k] = v
+    if "limit" not in extra:
+        extra["limit"] = 3
+    if "offset" not in extra:
+        extra["offset"] = 0
     try:
-        body = convoso_post(path, {"limit": 3, "offset": 0})
+        body = convoso_post(path, extra)
         return jsonify(body)
     except ConvosoAPIError as e:
         return jsonify({"error": str(e)}), 500
