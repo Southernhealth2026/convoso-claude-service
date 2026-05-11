@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <title>Operations · Southern Health</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Live Convoso operations terminal">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -64,7 +63,7 @@
   .wrap {
     position: relative;
     z-index: 2;
-    max-width: 1280px;
+    max-width: 1360px;
     margin: 0 auto;
     padding: 48px 56px 96px;
   }
@@ -96,13 +95,11 @@
     margin: 0;
     font-feature-settings: "liga", "dlig";
   }
-
   .masthead h1 em {
     font-style: italic;
     font-weight: 500;
     color: var(--gold);
   }
-
   .masthead .sub {
     font-family: var(--serif);
     font-style: italic;
@@ -125,12 +122,10 @@
     border-radius: 0;
     white-space: nowrap;
   }
-
   .status-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
     background: var(--good);
-    box-shadow: 0 0 0 0 var(--good);
     animation: pulse 2s infinite;
   }
   @keyframes pulse {
@@ -226,7 +221,7 @@
   .card h3 {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 24px;
+    font-size: 23px;
     line-height: 1.15;
     margin: 8px 0 18px;
     letter-spacing: -0.005em;
@@ -241,7 +236,7 @@
   .metric .big {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 64px;
+    font-size: 58px;
     line-height: 1;
     letter-spacing: -0.02em;
     font-feature-settings: "lnum", "tnum";
@@ -249,7 +244,7 @@
   .metric .unit {
     font-family: var(--serif);
     font-style: italic;
-    font-size: 22px;
+    font-size: 20px;
     color: var(--ink-soft);
   }
 
@@ -280,7 +275,7 @@
     margin-top: auto;
     font-family: var(--serif);
     font-style: italic;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.45;
     color: var(--ink-soft);
   }
@@ -305,6 +300,71 @@
   .card-tag.info  { color: var(--info); }
   .card-tag.idle  { color: var(--ink-faint); }
 
+  /* Sparklines */
+  .sparkline {
+    margin-top: 12px;
+    margin-bottom: -4px;
+    height: 36px;
+    width: 100%;
+    display: block;
+  }
+  .sparkline .line {
+    fill: none;
+    stroke: var(--ink-soft);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .sparkline .area {
+    fill: rgba(184, 146, 75, 0.18);
+    stroke: none;
+  }
+  .card.warn .sparkline .line { stroke: var(--warn); }
+  .card.warn .sparkline .area { fill: rgba(184, 118, 43, 0.18); }
+  .card.crit .sparkline .line { stroke: var(--crit); }
+  .card.crit .sparkline .area { fill: rgba(140, 47, 47, 0.18); }
+
+  /* Outlier panel */
+  .outliers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin-top: auto;
+  }
+  .outliers h4 {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .outliers ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .outliers li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--hairline);
+    font-size: 13px;
+  }
+  .outliers li:last-child { border-bottom: none; }
+  .outliers .name {
+    font-family: var(--serif);
+    font-size: 16px;
+    font-style: italic;
+  }
+  .outliers .stat {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+
+  /* Anomaly feed */
   .feed {
     border-top: 1px solid var(--hairline-strong);
     border-bottom: 1px solid var(--hairline-strong);
@@ -345,11 +405,11 @@
   .feed-row .title {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 19px;
+    font-size: 18px;
     line-height: 1.2;
   }
   .feed-row .detail {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--ink-soft);
   }
   .feed-empty {
@@ -357,7 +417,7 @@
     text-align: center;
     font-family: var(--serif);
     font-style: italic;
-    font-size: 19px;
+    font-size: 18px;
     color: var(--ink-faint);
   }
 
@@ -392,12 +452,16 @@
     100% { background-color: transparent; }
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1100px) {
+    .monitors { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 700px) {
     .wrap { padding: 32px 24px 64px; }
     .monitors { grid-template-columns: 1fr; }
     .card { border-right: 1px solid var(--hairline-strong); }
     .feed-row { grid-template-columns: 1fr; gap: 6px; }
     .masthead { grid-template-columns: 1fr; }
+    .outliers { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -430,21 +494,13 @@
   </div>
 
   <section class="monitors" id="monitors">
-    <article class="card" id="card-campaign_pauses">
-      <div class="eyebrow">Monitor 01</div>
-      <h3>Campaign continuity</h3>
-      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
-    </article>
-    <article class="card" id="card-non_connect_rate">
-      <div class="eyebrow">Monitor 02</div>
-      <h3>Non-connect rate</h3>
-      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
-    </article>
-    <article class="card" id="card-hopper">
-      <div class="eyebrow">Monitor 03</div>
-      <h3>Hopper depth</h3>
-      <div class="needs-setup-msg">Awaiting first poll&hellip;</div>
-    </article>
+    <article class="card" id="card-campaign_pauses"><div class="eyebrow">Monitor 01</div><h3>Campaign continuity</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-non_connect_rate"><div class="eyebrow">Monitor 02</div><h3>Non-connect rate</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-hopper"><div class="eyebrow">Monitor 03</div><h3>Hopper depth</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-idle_agents"><div class="eyebrow">Monitor 04</div><h3>Idle agents</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-connect_rate_by_list"><div class="eyebrow">Monitor 05</div><h3>Connect rate by list</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-am_ratio_drift"><div class="eyebrow">Monitor 06</div><h3>AM ratio drift</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-productivity_outliers" style="grid-column: span 3;"><div class="eyebrow">Monitor 07</div><h3>Productivity outliers</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
   </section>
 
   <div class="section-head fade-in" style="animation-delay:160ms">
@@ -460,15 +516,16 @@
   <footer>
     <span>Southern Health · Operations</span>
     <span class="ornament">· · ·</span>
-    <span id="version-text">v0.4 · Stage 1</span>
+    <span id="version-text">v0.5 · Stage 2</span>
   </footer>
 
 </div>
 
 <script>
   const REFRESH_MS = 30000;
-  let countdownTimer = null;
   let nextPollSeconds = REFRESH_MS / 1000;
+
+  // ---------- utils ----------
 
   function fmtTimeAgo(iso) {
     if (!iso) return "pending";
@@ -482,153 +539,11 @@
     return hr + "h ago";
   }
 
-  function updateStatusPill(status, anomalies) {
-    const pill = document.getElementById("status-pill");
-    const label = document.getElementById("status-label");
-    pill.className = "status-pill";
-    const recentCrit = anomalies.find(a => a.severity === "critical");
-    const recentWarn = anomalies.find(a => a.severity === "warning");
-    if (status === "error" || recentCrit) {
-      pill.classList.add("crit");
-      label.textContent = recentCrit ? "Action required" : "Service degraded";
-    } else if (status === "partial" || recentWarn) {
-      pill.classList.add("warn");
-      label.textContent = "Attention recommended";
-    } else if (status === "ok") {
-      label.textContent = "All systems normal";
-    } else {
-      pill.classList.add("idle");
-      label.textContent = "Initializing";
-    }
-  }
-
-  function renderCampaignCard(monitor) {
-    const card = document.getElementById("card-campaign_pauses");
-    const tag = monitor.status === "ok" ? "ok"
-              : monitor.status === "needs_setup" ? "info"
-              : monitor.status === "error" ? "crit" : "idle";
-    let body;
-    if (monitor.status === "error") {
-      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
-    } else if (monitor.status === "needs_setup") {
-      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
-    } else if (monitor.data) {
-      const d = monitor.data;
-      body = `
-        <div class="metric">
-          <span class="big">${d.active}</span>
-          <span class="unit">active</span>
-        </div>
-        <div class="breakdown">
-          <span>Total<b>${d.total}</b></span>
-          <span>Paused<b>${d.paused}</b></span>
-        </div>`;
-    } else {
-      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
-    }
-    card.className = "card" + (monitor.status === "error" ? " error"
-                              : monitor.status === "needs_setup" ? " setup" : "");
-    card.innerHTML = `
-      <span class="card-tag ${tag}">${tagLabel(monitor.status)}</span>
-      <div class="eyebrow">Monitor 01</div>
-      <h3>Campaign continuity</h3>
-      ${body}
-    `;
-  }
-
-  function renderNonConnectCard(monitor) {
-    const card = document.getElementById("card-non_connect_rate");
-    let body;
-    let cardClass = "card";
-    let tag = "idle";
-
-    if (monitor.status === "error") {
-      tag = "crit";
-      cardClass += " error";
-      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
-    } else if (monitor.status === "needs_setup") {
-      tag = "info";
-      cardClass += " setup";
-      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
-    } else if (monitor.data) {
-      const d = monitor.data;
-      const sev = d.severity || "ok";
-      tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
-      cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
-      const breakdownExtras = [];
-      if (d.agents_counted) breakdownExtras.push(`<span>Agents<b>${d.agents_counted}</b></span>`);
-      body = `
-        <div class="metric">
-          <span class="big">${(d.rate * 100).toFixed(1)}</span>
-          <span class="unit">% non-connect</span>
-        </div>
-        <div class="breakdown">
-          <span>Calls<b>${d.total_calls}</b></span>
-          <span>Live<b>${d.human_answered}</b></span>
-          <span>AM<b>${d.am}</b></span>
-          ${breakdownExtras.join("")}
-        </div>`;
-    } else {
-      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
-    }
-
-    card.className = cardClass;
-    card.innerHTML = `
-      <span class="card-tag ${tag}">${tagLabel(monitor.status, monitor.data && monitor.data.severity)}</span>
-      <div class="eyebrow">Monitor 02</div>
-      <h3>Non-connect rate</h3>
-      ${body}
-    `;
-  }
-
-  function renderHopperCard(monitor) {
-    const card = document.getElementById("card-hopper");
-    let body;
-    let cardClass = "card";
-    let tag = "idle";
-
-    if (monitor.status === "error") {
-      tag = "crit";
-      cardClass += " error";
-      body = `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
-    } else if (monitor.status === "needs_setup") {
-      tag = "info";
-      cardClass += " setup";
-      body = `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
-    } else if (monitor.data && Array.isArray(monitor.data.lists) && monitor.data.lists.length) {
-      const lists = monitor.data.lists;
-      const lowest = [...lists].sort((a, b) => a.remaining - b.remaining)[0];
-      const sev = lowest.severity || "ok";
-      tag = sev === "critical" ? "crit" : sev === "warning" ? "warn" : "ok";
-      cardClass += sev === "critical" ? " crit" : sev === "warning" ? " warn" : "";
-
-      const warningCount = lists.filter(L => L.severity === "warning").length;
-      const criticalCount = lists.filter(L => L.severity === "critical").length;
-
-      body = `
-        <div class="metric">
-          <span class="big">${formatLeads(lowest.remaining)}</span>
-          <span class="unit">leads · lowest</span>
-        </div>
-        <div class="breakdown">
-          <span>List<b>${escapeHtml(truncate(lowest.list_name, 24))}</b></span>
-          <span>Active<b>${monitor.data.active_total || lists.length}</b></span>
-          ${criticalCount ? `<span>Critical<b>${criticalCount}</b></span>` : ""}
-          ${warningCount ? `<span>Warning<b>${warningCount}</b></span>` : ""}
-        </div>`;
-    } else if (monitor.data) {
-      body = `<div class="needs-setup-msg">${escapeHtml(monitor.data.note || "No active lists found.")}</div>`;
-    } else {
-      body = `<div class="needs-setup-msg">Awaiting first poll&hellip;</div>`;
-    }
-
-    card.className = cardClass;
-    card.innerHTML = `
-      <span class="card-tag ${tag}">${tagLabel(monitor.status)}</span>
-      <div class="eyebrow">Monitor 03</div>
-      <h3>Hopper depth</h3>
-      ${body}
-    `;
+  function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s).replace(/[&<>"']/g, m => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[m]));
   }
 
   function formatLeads(n) {
@@ -652,6 +567,298 @@
     return "Nominal";
   }
 
+  function sparklineSVG(history, opts) {
+    if (!history || history.length < 2) return "";
+    const values = history.map(p => Number(p.value) || 0);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const w = 100, h = 30;
+    const span = max - min || 1;
+    const points = values.map((v, i) => {
+      const x = (i / (values.length - 1)) * w;
+      const y = h - ((v - min) / span) * h;
+      return [x, y];
+    });
+    const pathLine = "M" + points.map(p => p.join(",")).join(" L");
+    const pathArea = pathLine + ` L${w},${h} L0,${h} Z`;
+    return `
+      <svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+        <path class="area" d="${pathArea}"/>
+        <path class="line" d="${pathLine}"/>
+      </svg>`;
+  }
+
+  // ---------- status pill ----------
+
+  function updateStatusPill(status, anomalies) {
+    const pill = document.getElementById("status-pill");
+    const label = document.getElementById("status-label");
+    pill.className = "status-pill";
+    const recentCrit = anomalies.find(a => a.severity === "critical");
+    const recentWarn = anomalies.find(a => a.severity === "warning");
+    const critCount = anomalies.filter(a => a.severity === "critical").length;
+    const warnCount = anomalies.filter(a => a.severity === "warning").length;
+
+    if (status === "error" || recentCrit) {
+      pill.classList.add("crit");
+      label.textContent = critCount > 1 ? `${critCount} critical issues` : "Action required";
+    } else if (status === "partial" || recentWarn) {
+      pill.classList.add("warn");
+      label.textContent = warnCount > 1 ? `${warnCount} warnings` : "Attention recommended";
+    } else if (status === "ok") {
+      label.textContent = "All systems normal";
+    } else {
+      pill.classList.add("idle");
+      label.textContent = "Initializing";
+    }
+  }
+
+  // ---------- card renderers ----------
+
+  function renderCard(elemId, eyebrow, title, monitor, bodyHTML, extraSeverity) {
+    const card = document.getElementById(elemId);
+    const sev = extraSeverity || (monitor && monitor.data && monitor.data.severity);
+    const tag = monitor.status === "error" ? "crit"
+              : monitor.status === "needs_setup" ? "info"
+              : sev === "critical" ? "crit"
+              : sev === "warning" ? "warn"
+              : monitor.status === "ok" ? "ok" : "idle";
+    let cardClass = "card";
+    if (monitor.status === "error") cardClass += " error";
+    else if (monitor.status === "needs_setup") cardClass += " setup";
+    else if (sev === "critical") cardClass += " crit";
+    else if (sev === "warning") cardClass += " warn";
+    if (elemId === "card-productivity_outliers") cardClass += "";
+    card.className = cardClass;
+    card.style.gridColumn = (elemId === "card-productivity_outliers") ? "span 3" : "";
+    card.innerHTML = `
+      <span class="card-tag ${tag}">${tagLabel(monitor.status, sev)}</span>
+      <div class="eyebrow">${eyebrow}</div>
+      <h3>${title}</h3>
+      ${bodyHTML}
+    `;
+  }
+
+  function fallbackBody(monitor) {
+    if (monitor.status === "error") {
+      return `<div class="error-msg">${escapeHtml(monitor.error || "Unknown error")}</div>`;
+    }
+    if (monitor.status === "needs_setup") {
+      return `<div class="needs-setup-msg">${escapeHtml(monitor.error || "Setup required.")}</div>`;
+    }
+    return null;
+  }
+
+  function renderCampaignCard(monitor, history) {
+    let body = fallbackBody(monitor);
+    if (body == null) {
+      const d = monitor.data || {};
+      const spark = sparklineSVG(history.active_campaigns || []);
+      body = `
+        <div class="metric">
+          <span class="big">${d.active ?? 0}</span>
+          <span class="unit">active</span>
+        </div>
+        ${spark}
+        <div class="breakdown">
+          <span>Total<b>${d.total ?? 0}</b></span>
+          <span>Paused<b>${d.paused ?? 0}</b></span>
+        </div>`;
+    }
+    renderCard("card-campaign_pauses", "Monitor 01", "Campaign continuity", monitor, body);
+  }
+
+  function renderNonConnectCard(monitor, history) {
+    let body = fallbackBody(monitor);
+    let sev = monitor.data && monitor.data.severity;
+    if (body == null) {
+      const d = monitor.data;
+      const spark = sparklineSVG(history.non_connect_rate || []);
+      body = `
+        <div class="metric">
+          <span class="big">${(d.rate * 100).toFixed(1)}</span>
+          <span class="unit">% non-connect</span>
+        </div>
+        ${spark}
+        <div class="breakdown">
+          <span>Calls<b>${d.total_calls}</b></span>
+          <span>Live<b>${d.human_answered}</b></span>
+          <span>AM<b>${d.am}</b></span>
+          ${d.agents_counted ? `<span>Agents<b>${d.agents_counted}</b></span>` : ""}
+        </div>`;
+    }
+    renderCard("card-non_connect_rate", "Monitor 02", "Non-connect rate", monitor, body, sev);
+  }
+
+  function renderHopperCard(monitor) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      if (Array.isArray(d.lists) && d.lists.length) {
+        const lowest = [...d.lists].sort((a, b) => a.remaining - b.remaining)[0];
+        sev = lowest.severity || "ok";
+        const warningCount = d.lists.filter(L => L.severity === "warning").length;
+        const criticalCount = d.lists.filter(L => L.severity === "critical").length;
+        body = `
+          <div class="metric">
+            <span class="big">${formatLeads(lowest.remaining)}</span>
+            <span class="unit">leads · lowest</span>
+          </div>
+          <div class="breakdown">
+            <span>List<b>${escapeHtml(truncate(lowest.list_name, 22))}</b></span>
+            <span>Active<b>${d.active_total || d.lists.length}</b></span>
+            ${criticalCount ? `<span>Critical<b>${criticalCount}</b></span>` : ""}
+            ${warningCount ? `<span>Warning<b>${warningCount}</b></span>` : ""}
+          </div>`;
+      } else {
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "No active lists found.")}</div>`;
+      }
+    }
+    renderCard("card-hopper", "Monitor 03", "Hopper depth", monitor, body, sev);
+  }
+
+  function renderIdleAgentsCard(monitor, history) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      const idleCount = d.idle || 0;
+      const worst = (d.idle_list || [])[0];
+      if (worst && worst.severity === "critical") sev = "critical";
+      else if (idleCount > 0) sev = "warning";
+      const spark = sparklineSVG(history.logged_in_agents || []);
+      body = `
+        <div class="metric">
+          <span class="big">${idleCount}</span>
+          <span class="unit">idle</span>
+        </div>
+        ${spark}
+        <div class="breakdown">
+          <span>Logged in<b>${d.logged_in}</b></span>
+          <span>Active<b>${d.active}</b></span>
+          ${worst ? `<span>Worst<b>${escapeHtml(truncate(worst.name, 18))} · ${worst.wait_pct.toFixed(0)}%</b></span>` : ""}
+        </div>`;
+    }
+    renderCard("card-idle_agents", "Monitor 04", "Idle agents", monitor, body, sev);
+  }
+
+  function renderConnectRateByListCard(monitor) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      const lists = (d.lists || []).filter(L => L.rate !== null && L.calls >= (d.min_calls_to_evaluate || 0));
+      if (lists.length === 0) {
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Gathering connect-rate data across lists…")}</div>`;
+      } else {
+        const worst = lists[0];
+        sev = worst.severity;
+        const critCount = lists.filter(L => L.severity === "critical").length;
+        const warnCount = lists.filter(L => L.severity === "warning").length;
+        body = `
+          <div class="metric">
+            <span class="big">${((worst.rate || 0) * 100).toFixed(1)}</span>
+            <span class="unit">% lowest</span>
+          </div>
+          <div class="breakdown">
+            <span>List<b>${escapeHtml(truncate(worst.list_name, 22))}</b></span>
+            <span>Checked<b>${d.checked_so_far} / ${d.active_total}</b></span>
+            ${critCount ? `<span>Critical<b>${critCount}</b></span>` : ""}
+            ${warnCount ? `<span>Warning<b>${warnCount}</b></span>` : ""}
+          </div>`;
+      }
+    }
+    renderCard("card-connect_rate_by_list", "Monitor 05", "Connect rate by list", monitor, body, sev);
+  }
+
+  function renderAmDriftCard(monitor, history) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      sev = d.severity;
+      const spark = sparklineSVG(history.am_ratio || []);
+      if (d.current == null) {
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Awaiting data.")}</div>`;
+      } else if (d.baseline == null) {
+        body = `
+          <div class="metric">
+            <span class="big">${(d.current * 100).toFixed(1)}</span>
+            <span class="unit">% AM</span>
+          </div>
+          ${spark}
+          <div class="breakdown">
+            <span>Baseline<b>building…</b></span>
+            <span>Samples<b>${d.history_points}</b></span>
+          </div>`;
+      } else {
+        const ratio = d.ratio_to_baseline;
+        body = `
+          <div class="metric">
+            <span class="big">${(d.current * 100).toFixed(1)}</span>
+            <span class="unit">% AM</span>
+          </div>
+          ${spark}
+          <div class="breakdown">
+            <span>Baseline<b>${(d.baseline * 100).toFixed(1)}%</b></span>
+            <span>Ratio<b>${ratio != null ? ratio.toFixed(2) + "x" : "—"}</b></span>
+            <span>Samples<b>${d.history_points}</b></span>
+          </div>`;
+      }
+    }
+    renderCard("card-am_ratio_drift", "Monitor 06", "AM ratio drift", monitor, body, sev);
+  }
+
+  function renderOutliersCard(monitor) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      if (!d.team_mean_calls_per_hour) {
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Insufficient team size.")}</div>`;
+      } else {
+        const top = d.top || [];
+        const bottom = d.bottom || [];
+        if (bottom.length > 0) sev = "warning";
+        body = `
+          <div class="outliers">
+            <div>
+              <h4>Top performers</h4>
+              <ul>
+                ${top.length === 0 ? `<li class="stat" style="color:var(--ink-faint);font-style:italic;font-family:var(--serif);">No standouts above team average.</li>` :
+                  top.map(a => `
+                    <li>
+                      <span class="name">${escapeHtml(a.name)}</span>
+                      <span class="stat">${a.calls_per_hour} c/hr · z+${a.z_score.toFixed(1)}</span>
+                    </li>`).join("")}
+              </ul>
+            </div>
+            <div>
+              <h4>Underperformers</h4>
+              <ul>
+                ${bottom.length === 0 ? `<li class="stat" style="color:var(--ink-faint);font-style:italic;font-family:var(--serif);">No agents below threshold.</li>` :
+                  bottom.map(a => `
+                    <li>
+                      <span class="name">${escapeHtml(a.name)}</span>
+                      <span class="stat">${a.calls_per_hour} c/hr · z${a.z_score.toFixed(1)}</span>
+                    </li>`).join("")}
+              </ul>
+            </div>
+          </div>
+          <div class="breakdown" style="margin-top:18px;">
+            <span>Team avg<b>${d.team_mean_calls_per_hour} c/hr</b></span>
+            <span>Std dev<b>${d.team_stddev}</b></span>
+            <span>Team<b>${d.team_size} agents</b></span>
+          </div>
+        `;
+      }
+    }
+    renderCard("card-productivity_outliers", "Monitor 07", "Productivity outliers", monitor, body, sev);
+  }
+
+  // ---------- feed ----------
+
   function renderFeed(anomalies) {
     const feed = document.getElementById("feed");
     if (!anomalies || anomalies.length === 0) {
@@ -674,31 +881,33 @@
     }).join("");
   }
 
-  function escapeHtml(s) {
-    if (s == null) return "";
-    return String(s).replace(/[&<>"']/g, m => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    }[m]));
-  }
+  // ---------- refresh ----------
 
   async function refresh() {
     try {
       const resp = await fetch("/api/state", { cache: "no-store" });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const snap = await resp.json();
+      const m = snap.monitors || {};
+      const history = snap.history || {};
 
       updateStatusPill(snap.last_poll_status, snap.anomalies || []);
-      renderCampaignCard(snap.monitors.campaign_pauses);
-      renderNonConnectCard(snap.monitors.non_connect_rate);
-      renderHopperCard(snap.monitors.hopper);
+      renderCampaignCard(m.campaign_pauses || {status:"pending"}, history);
+      renderNonConnectCard(m.non_connect_rate || {status:"pending"}, history);
+      renderHopperCard(m.hopper || {status:"pending"});
+      renderIdleAgentsCard(m.idle_agents || {status:"pending"}, history);
+      renderConnectRateByListCard(m.connect_rate_by_list || {status:"pending"});
+      renderAmDriftCard(m.am_ratio_drift || {status:"pending"}, history);
+      renderOutliersCard(m.productivity_outliers || {status:"pending"});
       renderFeed(snap.anomalies);
 
       document.getElementById("last-poll-text").textContent =
         "Last refresh: " + fmtTimeAgo(snap.last_poll_at);
 
-      document.getElementById("monitors").classList.remove("updated-flash");
-      void document.getElementById("monitors").offsetWidth;
-      document.getElementById("monitors").classList.add("updated-flash");
+      const monitors = document.getElementById("monitors");
+      monitors.classList.remove("updated-flash");
+      void monitors.offsetWidth;
+      monitors.classList.add("updated-flash");
 
     } catch (err) {
       const pill = document.getElementById("status-pill");
@@ -711,17 +920,13 @@
 
   function updateNextPollText() {
     const t = document.getElementById("next-poll-text");
-    if (nextPollSeconds <= 0) {
-      t.textContent = "Refreshing…";
-    } else {
-      t.textContent = "Next refresh in " + nextPollSeconds + "s";
-    }
+    t.textContent = nextPollSeconds <= 0 ? "Refreshing…" : "Next refresh in " + nextPollSeconds + "s";
     nextPollSeconds = Math.max(0, nextPollSeconds - 1);
   }
 
   refresh();
   setInterval(refresh, REFRESH_MS);
-  countdownTimer = setInterval(updateNextPollText, 1000);
+  setInterval(updateNextPollText, 1000);
 </script>
 </body>
 </html>
