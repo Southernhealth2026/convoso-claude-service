@@ -300,7 +300,6 @@
   .card-tag.info  { color: var(--info); }
   .card-tag.idle  { color: var(--ink-faint); }
 
-  /* Sparklines */
   .sparkline {
     margin-top: 12px;
     margin-bottom: -4px;
@@ -324,7 +323,6 @@
   .card.crit .sparkline .line { stroke: var(--crit); }
   .card.crit .sparkline .area { fill: rgba(140, 47, 47, 0.18); }
 
-  /* Outlier panel */
   .outliers {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -363,8 +361,35 @@
     font-size: 11px;
     color: var(--ink-soft);
   }
+  .outliers .empty {
+    color: var(--ink-faint);
+    font-style: italic;
+    font-family: var(--serif);
+  }
 
-  /* Anomaly feed */
+  /* Excluded agents footnote */
+  .excluded-note {
+    margin-top: 14px;
+    padding: 8px 12px;
+    border-left: 2px solid var(--gold);
+    background: rgba(184, 146, 75, 0.06);
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+  .excluded-note b {
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+    display: block;
+    margin-bottom: 2px;
+  }
+
   .feed {
     border-top: 1px solid var(--hairline-strong);
     border-bottom: 1px solid var(--hairline-strong);
@@ -411,6 +436,17 @@
   .feed-row .detail {
     font-size: 13px;
     color: var(--ink-soft);
+  }
+  /* Resolved entries get a quieter look */
+  .feed-row.resolved .title { color: var(--ink-soft); }
+  .feed-row.resolved .body::after {
+    content: "·  resolved";
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--good);
+    margin-top: 2px;
   }
   .feed-empty {
     padding: 48px 0;
@@ -516,7 +552,7 @@
   <footer>
     <span>Southern Health · Operations</span>
     <span class="ornament">· · ·</span>
-    <span id="version-text">v0.5 · Stage 2</span>
+    <span id="version-text">v0.6 · Stage 2 polished</span>
   </footer>
 
 </div>
@@ -567,7 +603,7 @@
     return "Nominal";
   }
 
-  function sparklineSVG(history, opts) {
+  function sparklineSVG(history) {
     if (!history || history.length < 2) return "";
     const values = history.map(p => Number(p.value) || 0);
     const min = Math.min(...values);
@@ -594,15 +630,16 @@
     const pill = document.getElementById("status-pill");
     const label = document.getElementById("status-label");
     pill.className = "status-pill";
-    const recentCrit = anomalies.find(a => a.severity === "critical");
-    const recentWarn = anomalies.find(a => a.severity === "warning");
-    const critCount = anomalies.filter(a => a.severity === "critical").length;
-    const warnCount = anomalies.filter(a => a.severity === "warning").length;
+    // Look at only recent anomalies for pill state (last 5 min)
+    const cutoff = Date.now() / 1000 - 300;
+    const recent = anomalies.filter(a => (a.ts_epoch || 0) >= cutoff);
+    const critCount = recent.filter(a => a.severity === "critical").length;
+    const warnCount = recent.filter(a => a.severity === "warning").length;
 
-    if (status === "error" || recentCrit) {
+    if (status === "error" || critCount) {
       pill.classList.add("crit");
       label.textContent = critCount > 1 ? `${critCount} critical issues` : "Action required";
-    } else if (status === "partial" || recentWarn) {
+    } else if (status === "partial" || warnCount) {
       pill.classList.add("warn");
       label.textContent = warnCount > 1 ? `${warnCount} warnings` : "Attention recommended";
     } else if (status === "ok") {
@@ -613,7 +650,7 @@
     }
   }
 
-  // ---------- card renderers ----------
+  // ---------- card render shell ----------
 
   function renderCard(elemId, eyebrow, title, monitor, bodyHTML, extraSeverity) {
     const card = document.getElementById(elemId);
@@ -628,7 +665,6 @@
     else if (monitor.status === "needs_setup") cardClass += " setup";
     else if (sev === "critical") cardClass += " crit";
     else if (sev === "warning") cardClass += " warn";
-    if (elemId === "card-productivity_outliers") cardClass += "";
     card.className = cardClass;
     card.style.gridColumn = (elemId === "card-productivity_outliers") ? "span 3" : "";
     card.innerHTML = `
@@ -816,17 +852,23 @@
     if (body == null) {
       const d = monitor.data;
       if (!d.team_mean_calls_per_hour) {
-        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Insufficient team size.")}</div>`;
+        const excludedNote = d.excluded_count
+          ? `<div class="excluded-note"><b>Excluded</b>${d.excluded_count} inbound/non-dialer agents skipped (${escapeHtml((d.excluded_names || []).slice(0, 5).join(", "))}${d.excluded_count > 5 ? `, +${d.excluded_count - 5} more` : ""}).</div>`
+          : "";
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Insufficient team size.")}</div>${excludedNote}`;
       } else {
         const top = d.top || [];
         const bottom = d.bottom || [];
         if (bottom.length > 0) sev = "warning";
+        const excludedNote = d.excluded_count
+          ? `<div class="excluded-note"><b>Excluded from comparison</b>${d.excluded_count} inbound/non-dialer agent${d.excluded_count > 1 ? "s" : ""}: ${escapeHtml((d.excluded_names || []).slice(0, 5).join(", "))}${d.excluded_count > 5 ? `, +${d.excluded_count - 5} more` : ""}.</div>`
+          : "";
         body = `
           <div class="outliers">
             <div>
               <h4>Top performers</h4>
               <ul>
-                ${top.length === 0 ? `<li class="stat" style="color:var(--ink-faint);font-style:italic;font-family:var(--serif);">No standouts above team average.</li>` :
+                ${top.length === 0 ? `<li class="empty">No standouts above team average.</li>` :
                   top.map(a => `
                     <li>
                       <span class="name">${escapeHtml(a.name)}</span>
@@ -837,7 +879,7 @@
             <div>
               <h4>Underperformers</h4>
               <ul>
-                ${bottom.length === 0 ? `<li class="stat" style="color:var(--ink-faint);font-style:italic;font-family:var(--serif);">No agents below threshold.</li>` :
+                ${bottom.length === 0 ? `<li class="empty">No agents below threshold.</li>` :
                   bottom.map(a => `
                     <li>
                       <span class="name">${escapeHtml(a.name)}</span>
@@ -849,8 +891,9 @@
           <div class="breakdown" style="margin-top:18px;">
             <span>Team avg<b>${d.team_mean_calls_per_hour} c/hr</b></span>
             <span>Std dev<b>${d.team_stddev}</b></span>
-            <span>Team<b>${d.team_size} agents</b></span>
+            <span>Dialers<b>${d.team_size} agents</b></span>
           </div>
+          ${excludedNote}
         `;
       }
     }
@@ -869,8 +912,9 @@
       const sevClass = a.severity === "critical" ? "crit"
                      : a.severity === "warning" ? "warn"
                      : "info";
+      const isResolved = (a.title || "").toLowerCase().startsWith("resolved");
       return `
-        <div class="feed-row">
+        <div class="feed-row ${isResolved ? "resolved" : ""}">
           <span class="when">${fmtTimeAgo(a.ts)}</span>
           <span class="badge ${sevClass}">${a.severity}</span>
           <div class="body">
