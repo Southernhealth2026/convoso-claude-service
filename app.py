@@ -1,10 +1,8 @@
 """
 Convoso Claude Operations Center
 
-Phase 1: Receives Convoso disposition webhooks, generates Claude summaries,
-         posts back to lead Notes field.
-Phase 2: Monitors Convoso operations every 30 seconds, surfaces anomalies on
-         a live dashboard at /dashboard.
+Phase 1: Receives Convoso disposition webhooks, generates Claude summaries.
+Phase 2: Live ops dashboard with 7 monitors at /dashboard.
 
 Stage 1 monitors:
   - Campaign continuity   (via /campaigns/search)
@@ -12,10 +10,15 @@ Stage 1 monitors:
   - List depth (hopper)   (via /lists/search + /leads/search per list)
 
 Stage 2 monitors:
-  - Idle agents           (via /agent-monitor/search)
+  - Idle agents           (via /agent-performance/search wait_sec_pt)
   - Connect rate by list  (via /agent-performance/search with list_ids)
   - AM ratio drift        (via /agent-performance/search + history)
-  - Productivity outliers (via /agent-performance/search)
+  - Productivity outliers (via /agent-performance/search; excludes inbound)
+
+Polish (v0.6):
+  - Inbound agents (Custo / Manager / Sup) excluded from outliers
+  - Anomalies fire only on state transitions, not every poll
+  - Resolved transitions emit "info" anomalies for visibility
 """
 
 import json
@@ -53,33 +56,35 @@ CONVOSO_API_BASE = "https://api.convoso.com/v1"
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 
-# --- thresholds (all tunable via env vars) ---
 NON_CONNECT_WARN_THRESHOLD = float(os.environ.get("NON_CONNECT_WARN_THRESHOLD", "0.65"))
 NON_CONNECT_CRIT_THRESHOLD = float(os.environ.get("NON_CONNECT_CRIT_THRESHOLD", "0.80"))
 
 HOPPER_WARN_LEADS = int(os.environ.get("HOPPER_WARN_LEADS", "1000"))
 HOPPER_CRIT_LEADS = int(os.environ.get("HOPPER_CRIT_LEADS", "200"))
 
-# Idle = logged in with too-high wait_sec_pt (% of time spent waiting)
-IDLE_WAIT_PCT_WARN = float(os.environ.get("IDLE_WAIT_PCT_WARN", "90"))   # >90% time waiting
-IDLE_WAIT_PCT_CRIT = float(os.environ.get("IDLE_WAIT_PCT_CRIT", "95"))   # >95% time waiting
+IDLE_WAIT_PCT_WARN = float(os.environ.get("IDLE_WAIT_PCT_WARN", "90"))
+IDLE_WAIT_PCT_CRIT = float(os.environ.get("IDLE_WAIT_PCT_CRIT", "95"))
 
-# Per-list connect rate thresholds
-CONNECT_RATE_WARN = float(os.environ.get("CONNECT_RATE_WARN", "0.15"))   # below 15% = warning
-CONNECT_RATE_CRIT = float(os.environ.get("CONNECT_RATE_CRIT", "0.08"))   # below 8% = critical
-CONNECT_RATE_MIN_CALLS = int(os.environ.get("CONNECT_RATE_MIN_CALLS", "20"))  # ignore lists with <20 calls
-CONNECT_RATE_MAX_LISTS = int(os.environ.get("CONNECT_RATE_MAX_LISTS", "20"))  # cap per poll
+CONNECT_RATE_WARN = float(os.environ.get("CONNECT_RATE_WARN", "0.15"))
+CONNECT_RATE_CRIT = float(os.environ.get("CONNECT_RATE_CRIT", "0.08"))
+CONNECT_RATE_MIN_CALLS = int(os.environ.get("CONNECT_RATE_MIN_CALLS", "20"))
 
-# AM ratio drift - compare current to rolling avg
-AM_DRIFT_RATIO_WARN = float(os.environ.get("AM_DRIFT_RATIO_WARN", "1.30"))  # 30% above avg
-AM_DRIFT_RATIO_CRIT = float(os.environ.get("AM_DRIFT_RATIO_CRIT", "1.50"))  # 50% above avg
-AM_DRIFT_MIN_HISTORY = int(os.environ.get("AM_DRIFT_MIN_HISTORY", "10"))    # need 10 samples
+AM_DRIFT_RATIO_WARN = float(os.environ.get("AM_DRIFT_RATIO_WARN", "1.30"))
+AM_DRIFT_RATIO_CRIT = float(os.environ.get("AM_DRIFT_RATIO_CRIT", "1.50"))
+AM_DRIFT_MIN_HISTORY = int(os.environ.get("AM_DRIFT_MIN_HISTORY", "10"))
 
-# Productivity outlier thresholds
 OUTLIER_MIN_TEAM_SIZE = int(os.environ.get("OUTLIER_MIN_TEAM_SIZE", "5"))
 OUTLIER_STDDEV_THRESHOLD = float(os.environ.get("OUTLIER_STDDEV_THRESHOLD", "2.0"))
 
-# History buffer size (= 30 minutes at 30s polls)
+# Inbound / non-dialer name patterns. Case-insensitive substring match.
+# Override with comma-separated patterns in OUTLIER_EXCLUDE_PATTERNS env var.
+DEFAULT_EXCLUDE_PATTERNS = "custo,customer,inbound,manager,sup,supervisor,trainer,training,test,admin,qa"
+OUTLIER_EXCLUDE_PATTERNS = [
+    p.strip().lower()
+    for p in os.environ.get("OUTLIER_EXCLUDE_PATTERNS", DEFAULT_EXCLUDE_PATTERNS).split(",")
+    if p.strip()
+]
+
 HISTORY_MAX_POINTS = int(os.environ.get("HISTORY_MAX_POINTS", "60"))
 
 if not ANTHROPIC_API_KEY:
@@ -91,7 +96,7 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY els
 
 
 # ---------------------------------------------------------------------------
-# State store with time-series history
+# State store with transition tracking
 # ---------------------------------------------------------------------------
 
 MONITOR_NAMES = [
@@ -116,13 +121,15 @@ class StateStore:
         }
         self.anomalies = deque(maxlen=200)
         self.previous = {}
-        # Time-series history per metric
         self.history = {
             "non_connect_rate": deque(maxlen=HISTORY_MAX_POINTS),
             "am_ratio":         deque(maxlen=HISTORY_MAX_POINTS),
             "active_campaigns": deque(maxlen=HISTORY_MAX_POINTS),
             "logged_in_agents": deque(maxlen=HISTORY_MAX_POINTS),
         }
+        # Per-monitor entity severity tracking for state-transition anomalies.
+        # Shape: {monitor_name: {entity_id: severity_string}}
+        self.entity_severity = {}
 
     def update_monitor(self, name, status, data=None, error=None):
         with self.lock:
@@ -143,7 +150,6 @@ class StateStore:
             })
 
     def record_metric(self, name, value):
-        """Append a metric point to history."""
         if value is None:
             return
         with self.lock:
@@ -159,6 +165,52 @@ class StateStore:
         if n is not None:
             arr = arr[-n:]
         return arr
+
+    def get_entity_severity(self, monitor, entity_id):
+        with self.lock:
+            return self.entity_severity.get(monitor, {}).get(str(entity_id), "ok")
+
+    def set_entity_severity(self, monitor, entity_id, severity):
+        with self.lock:
+            if monitor not in self.entity_severity:
+                self.entity_severity[monitor] = {}
+            self.entity_severity[monitor][str(entity_id)] = severity
+
+    def all_entity_severities(self, monitor):
+        with self.lock:
+            return dict(self.entity_severity.get(monitor, {}))
+
+    def emit_on_transition(self, monitor, entity_id, new_severity,
+                           entity_name, detail_for_new_severity):
+        """Emit anomaly only when an entity's severity changes. Resolutions
+        (warning/critical -> ok) emit an 'info' anomaly so the operator sees
+        the closure event. Returns True if an anomaly was emitted."""
+        prev_severity = self.get_entity_severity(monitor, entity_id)
+        if prev_severity == new_severity:
+            return False
+        self.set_entity_severity(monitor, entity_id, new_severity)
+
+        # Going to a worse state - emit an alert at that severity
+        if new_severity in ("warning", "critical"):
+            self.add_anomaly(
+                severity=new_severity, monitor=monitor,
+                title=f"{entity_name}",
+                detail=detail_for_new_severity,
+                fingerprint=f"{monitor}:{entity_id}:{new_severity}",
+            )
+            return True
+
+        # Returning to ok from a non-ok state - emit a resolution event
+        if new_severity == "ok" and prev_severity in ("warning", "critical"):
+            self.add_anomaly(
+                severity="info", monitor=monitor,
+                title=f"Resolved: {entity_name}",
+                detail=f"Returned to normal from {prev_severity}.",
+                fingerprint=f"{monitor}:{entity_id}:resolved",
+            )
+            return True
+
+        return False
 
     def snapshot(self):
         with self.lock:
@@ -339,17 +391,14 @@ def update_convoso_lead_notes(lead_id, notes):
 
 
 # ---------------------------------------------------------------------------
-# Shared fetchers (cached within a single poll cycle)
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 class PollCache:
-    """Cache shared between monitors in a single poll cycle to avoid
-    duplicate API calls."""
     def __init__(self):
         self.agent_performance = None
         self.lists = None
         self.campaigns = None
-        self.agent_monitor = None
 
 
 def _to_number(v):
@@ -372,9 +421,16 @@ def is_active_status(status_val):
     return s in ("y", "yes", "1", "true", "active", "running")
 
 
+def is_excluded_agent(name):
+    """True if the agent name matches any of the exclude patterns
+    (inbound, custo, manager, etc.)."""
+    if not name:
+        return False
+    name_lower = name.lower()
+    return any(p in name_lower for p in OUTLIER_EXCLUDE_PATTERNS)
+
+
 def fetch_agent_performance(cache, list_ids=None):
-    """Fetch /agent-performance/search. If list_ids given, fetches scoped to
-    those lists (not cached because list_ids change). Otherwise uses cache."""
     if list_ids is not None:
         payload = {"list_ids": ",".join(str(i) for i in list_ids)}
         body = convoso_post("/agent-performance/search", payload)
@@ -428,17 +484,6 @@ def fetch_campaigns_cached(cache):
     return cache.campaigns
 
 
-def fetch_agent_monitor_cached(cache):
-    if cache.agent_monitor is None:
-        body = convoso_post("/agent-monitor/search", {})
-        if not body.get("success"):
-            raise ConvosoAPIError(
-                f"agent-monitor/search failed: code={body.get('code')} text={body.get('text')}"
-            )
-        cache.agent_monitor = body.get("data") or {}
-    return cache.agent_monitor
-
-
 # ---------------------------------------------------------------------------
 # Monitor 01: Campaign continuity
 # ---------------------------------------------------------------------------
@@ -463,29 +508,20 @@ def monitor_campaign_pauses(cache):
             active = bool(active)
         summary.append({"id": cid, "name": name, "active": active})
 
-    prev = state.previous.get("campaign_pauses") or {}
-    prev_by_id = {c["id"]: c for c in prev.get("campaigns", [])}
+    # Use transition tracking for pause/resume events
     for c in summary:
-        prev_state = prev_by_id.get(c["id"])
-        if prev_state is None:
-            continue
-        if prev_state["active"] and not c["active"]:
-            state.add_anomaly(
-                severity="warning", monitor="campaign_pauses",
-                title=f"Campaign paused: {c['name']}",
-                detail=f"Campaign id {c['id']} transitioned from active to paused.",
-                fingerprint=f"campaign_paused:{c['id']}",
-            )
-        elif not prev_state["active"] and c["active"]:
-            state.add_anomaly(
-                severity="info", monitor="campaign_pauses",
-                title=f"Campaign resumed: {c['name']}",
-                detail=f"Campaign id {c['id']} transitioned from paused to active.",
-                fingerprint=f"campaign_resumed:{c['id']}",
-            )
+        new_severity = "ok" if c["active"] else "warning"
+        state.emit_on_transition(
+            monitor="campaign_pauses",
+            entity_id=c["id"],
+            new_severity=new_severity,
+            entity_name=("Campaign resumed: " if c["active"] else "Campaign paused: ") + c["name"],
+            detail_for_new_severity=(f"Campaign id {c['id']} is now paused."
+                                     if not c["active"]
+                                     else f"Campaign id {c['id']} is active again."),
+        )
 
     active_count = sum(1 for c in summary if c["active"])
-    state.previous["campaign_pauses"] = {"campaigns": summary}
     state.record_metric("active_campaigns", active_count)
     state.update_monitor("campaign_pauses", "ok", data={
         "total": len(summary),
@@ -560,14 +596,17 @@ def monitor_non_connect_rate(cache):
     elif rate >= NON_CONNECT_WARN_THRESHOLD:
         severity = "warning"
 
-    if severity in ("warning", "critical"):
-        state.add_anomaly(
-            severity=severity, monitor="non_connect_rate",
-            title=f"Non-connect rate at {rate*100:.1f}%",
-            detail=(f"{int(non_connects)} non-connects out of {int(total_calls)} dialed "
-                    f"(human: {int(total_human)}, AM: {int(total_am)})."),
-            fingerprint=f"non_connect_rate:{severity}",
-        )
+    # Single-entity transition: the whole team's non-connect rate.
+    state.emit_on_transition(
+        monitor="non_connect_rate",
+        entity_id="team",
+        new_severity=severity,
+        entity_name=f"Non-connect rate at {rate*100:.1f}%",
+        detail_for_new_severity=(
+            f"{int(non_connects)} non-connects out of {int(total_calls)} dialed "
+            f"(human: {int(total_human)}, AM: {int(total_am)})."
+        ),
+    )
 
     state.record_metric("non_connect_rate", rate)
     state.record_metric("am_ratio", am_ratio)
@@ -643,10 +682,12 @@ def monitor_hopper_depletion(cache):
     errors_per_list = []
     max_lists_per_poll = int(os.environ.get("HOPPER_MAX_LISTS_PER_POLL", "20"))
     checked = active_lists[:max_lists_per_poll]
+    checked_ids = set()
 
     for L in checked:
         list_id = L.get("id")
         list_name = L.get("name") or f"List {list_id}"
+        checked_ids.add(str(list_id))
         try:
             total = count_leads_in_list(list_id)
         except ConvosoAPIError as e:
@@ -659,13 +700,13 @@ def monitor_hopper_depletion(cache):
         elif total <= HOPPER_WARN_LEADS:
             severity = "warning"
 
-        if severity in ("warning", "critical"):
-            state.add_anomaly(
-                severity=severity, monitor="hopper",
-                title=f"List depleting: {list_name}",
-                detail=f"{total} leads remain in active list (id {list_id}).",
-                fingerprint=f"hopper:{list_id}:{severity}",
-            )
+        state.emit_on_transition(
+            monitor="hopper",
+            entity_id=list_id,
+            new_severity=severity,
+            entity_name=f"List depleting: {list_name}",
+            detail_for_new_severity=f"{total} leads remain in active list (id {list_id}).",
+        )
 
         summaries.append({
             "list_id": list_id,
@@ -691,11 +732,6 @@ def monitor_hopper_depletion(cache):
 
 # ---------------------------------------------------------------------------
 # Monitor 04: Idle agents
-#
-# Strategy: use agent-performance's wait_sec_pt field, which is the percentage
-# of each agent's logged-in time spent waiting. High wait% with low calls
-# means they're online but not productive. This is a much cleaner signal than
-# trying to combine /agent-monitor/search with call counts.
 # ---------------------------------------------------------------------------
 
 def monitor_idle_agents(cache):
@@ -722,18 +758,30 @@ def monitor_idle_agents(cache):
         name = stats.get("name") or f"Agent {agent_id}"
         wait_pct = _to_number(stats.get("wait_sec_pt"))
         calls = _to_number(stats.get("calls")) or 0
-        total_time = stats.get("total_time")    # "HH:MM:SS" string
+        total_time = stats.get("total_time")
         if wait_pct is None:
             continue
         logged_in_count += 1
 
-        severity = None
+        severity = "ok"
         if wait_pct >= IDLE_WAIT_PCT_CRIT:
             severity = "critical"
         elif wait_pct >= IDLE_WAIT_PCT_WARN:
             severity = "warning"
 
-        if severity:
+        state.emit_on_transition(
+            monitor="idle_agents",
+            entity_id=agent_id,
+            new_severity=severity,
+            entity_name=f"Agent waiting: {name}",
+            detail_for_new_severity=(
+                f"{wait_pct:.0f}% of logged-in time waiting ({int(calls)} calls)."
+            ),
+        )
+
+        if severity == "ok":
+            active_count += 1
+        else:
             idle_list.append({
                 "user_id": agent_id,
                 "name": name,
@@ -742,14 +790,6 @@ def monitor_idle_agents(cache):
                 "total_time": total_time,
                 "severity": severity,
             })
-            state.add_anomaly(
-                severity=severity, monitor="idle_agents",
-                title=f"Agent waiting: {name}",
-                detail=f"{wait_pct:.0f}% of logged-in time waiting ({int(calls)} calls).",
-                fingerprint=f"idle:{agent_id}:{severity}",
-            )
-        else:
-            active_count += 1
 
     state.update_monitor("idle_agents", "ok", data={
         "logged_in": logged_in_count,
@@ -764,13 +804,9 @@ def monitor_idle_agents(cache):
 
 # ---------------------------------------------------------------------------
 # Monitor 05: Connect rate by list
-#
-# For each active list, call /agent-performance/search with list_ids=<id>
-# and compute human_answered / calls. Spread across multiple poll cycles to
-# limit API load - we cycle through active lists round-robin.
 # ---------------------------------------------------------------------------
 
-_connect_rate_results = {}    # list_id -> {result dict, ts_epoch}
+_connect_rate_results = {}
 _connect_rate_lock = threading.Lock()
 _connect_rate_round_robin_index = 0
 
@@ -795,7 +831,6 @@ def monitor_connect_rate_by_list(cache):
         })
         return
 
-    # Round-robin: each poll cycle, check the next N lists
     per_cycle = int(os.environ.get("CONNECT_RATE_PER_CYCLE", "4"))
     start = _connect_rate_round_robin_index % len(active_lists)
     batch = []
@@ -825,6 +860,13 @@ def monitor_connect_rate_by_list(cache):
                     "calls": 0, "human_answered": 0, "rate": None,
                     "ts_epoch": now, "note": "No agent activity on this list.",
                 }
+            # No data == treat as ok severity
+            state.emit_on_transition(
+                monitor="connect_rate_by_list", entity_id=list_id,
+                new_severity="ok",
+                entity_name=f"Low connect rate: {list_name}",
+                detail_for_new_severity="",
+            )
             continue
 
         calls_sum = 0.0
@@ -845,13 +887,13 @@ def monitor_connect_rate_by_list(cache):
             elif rate <= CONNECT_RATE_WARN:
                 severity = "warning"
 
-        if severity in ("warning", "critical"):
-            state.add_anomaly(
-                severity=severity, monitor="connect_rate_by_list",
-                title=f"Low connect rate: {list_name}",
-                detail=f"{(rate or 0)*100:.1f}% connect on {int(calls_sum)} calls.",
-                fingerprint=f"connect_rate:{list_id}:{severity}",
-            )
+        state.emit_on_transition(
+            monitor="connect_rate_by_list",
+            entity_id=list_id,
+            new_severity=severity,
+            entity_name=f"Low connect rate: {list_name}",
+            detail_for_new_severity=f"{(rate or 0)*100:.1f}% connect on {int(calls_sum)} calls.",
+        )
 
         with _connect_rate_lock:
             _connect_rate_results[list_id] = {
@@ -860,11 +902,9 @@ def monitor_connect_rate_by_list(cache):
                 "rate": rate, "severity": severity, "ts_epoch": now,
             }
 
-    # Build summary from cached results, filtering out stale entries
     with _connect_rate_lock:
         results = list(_connect_rate_results.values())
 
-    # Drop entries for lists no longer active
     active_ids = {L.get("id") for L in active_lists}
     results = [r for r in results if r.get("list_id") in active_ids]
 
@@ -880,9 +920,6 @@ def monitor_connect_rate_by_list(cache):
 
 # ---------------------------------------------------------------------------
 # Monitor 06: AM ratio drift
-#
-# Compares current AM% to the rolling average over recent history. Sudden
-# spikes indicate list quality issues, timezone problems, or DID issues.
 # ---------------------------------------------------------------------------
 
 def monitor_am_ratio_drift(cache):
@@ -891,22 +928,17 @@ def monitor_am_ratio_drift(cache):
 
     if current is None:
         state.update_monitor("am_ratio_drift", "ok", data={
-            "current": None,
-            "baseline": None,
-            "ratio_to_baseline": None,
-            "severity": "ok",
+            "current": None, "baseline": None,
+            "ratio_to_baseline": None, "severity": "ok",
             "history_points": 0,
             "note": "Waiting for AM ratio data to accumulate.",
         })
         return
 
-    # Need enough history before we trust the baseline
     if len(history) < AM_DRIFT_MIN_HISTORY:
         state.update_monitor("am_ratio_drift", "ok", data={
-            "current": current,
-            "baseline": None,
-            "ratio_to_baseline": None,
-            "severity": "ok",
+            "current": current, "baseline": None,
+            "ratio_to_baseline": None, "severity": "ok",
             "history_points": len(history),
             "warn_ratio": AM_DRIFT_RATIO_WARN,
             "crit_ratio": AM_DRIFT_RATIO_CRIT,
@@ -914,7 +946,6 @@ def monitor_am_ratio_drift(cache):
         })
         return
 
-    # Use median of older history (excludes most recent point) as baseline
     older = [p["value"] for p in history[:-1]]
     baseline = statistics.median(older)
 
@@ -927,13 +958,17 @@ def monitor_am_ratio_drift(cache):
         elif ratio_to_baseline >= AM_DRIFT_RATIO_WARN:
             severity = "warning"
 
-    if severity in ("warning", "critical"):
-        state.add_anomaly(
-            severity=severity, monitor="am_ratio_drift",
-            title=f"AM ratio spike: {current*100:.1f}% (baseline {baseline*100:.1f}%)",
-            detail=f"Answering-machine ratio is {ratio_to_baseline:.2f}x the recent baseline.",
-            fingerprint=f"am_drift:{severity}",
-        )
+    state.emit_on_transition(
+        monitor="am_ratio_drift",
+        entity_id="team",
+        new_severity=severity,
+        entity_name=f"AM ratio spike: {current*100:.1f}% (baseline {baseline*100:.1f}%)",
+        detail_for_new_severity=(
+            f"Answering-machine ratio is "
+            f"{ratio_to_baseline:.2f}x the recent baseline."
+            if ratio_to_baseline is not None else ""
+        ),
+    )
 
     state.update_monitor("am_ratio_drift", "ok", data={
         "current": current,
@@ -947,14 +982,10 @@ def monitor_am_ratio_drift(cache):
 
 
 # ---------------------------------------------------------------------------
-# Monitor 07: Productivity outliers
-#
-# Identify agents who are >N std deviations above or below team mean for
-# 'calls'. Excludes obvious non-dialers (zero calls or very short total_time).
+# Monitor 07: Productivity outliers (with inbound filter)
 # ---------------------------------------------------------------------------
 
 def parse_hms(s):
-    """Parse 'HH:MM:SS' into total seconds. Returns None on failure."""
     if not s:
         return None
     try:
@@ -975,33 +1006,55 @@ def monitor_productivity_outliers(cache):
         return
 
     eligible = []
+    excluded = []
     for agent_id, stats in agents.items():
         if not isinstance(stats, dict):
             continue
+        name = stats.get("name") or f"Agent {agent_id}"
         calls = _to_number(stats.get("calls"))
         total_sec = parse_hms(stats.get("total_time"))
-        # Only consider agents who've been logged in long enough to be comparable
         if calls is None or total_sec is None:
             continue
-        if total_sec < 1800:    # less than 30 min logged in - skip
+        if total_sec < 1800:
+            continue
+        if is_excluded_agent(name):
+            excluded.append({"user_id": agent_id, "name": name})
             continue
         eligible.append({
             "user_id": agent_id,
-            "name": stats.get("name") or f"Agent {agent_id}",
+            "name": name,
             "calls": int(calls),
             "total_time": stats.get("total_time"),
             "total_sec": total_sec,
             "human_answered": int(_to_number(stats.get("human_answered")) or 0),
         })
 
+    # Clear previous outlier transitions for agents that are no longer eligible
+    # so resolved events fire when they leave the cohort.
+    previous_severities = state.all_entity_severities("productivity_outliers")
+    eligible_ids = {str(a["user_id"]) for a in eligible}
+    for prev_id, prev_sev in previous_severities.items():
+        if prev_id not in eligible_ids and prev_sev in ("warning", "critical"):
+            # Agent no longer in cohort - resolve
+            state.emit_on_transition(
+                monitor="productivity_outliers",
+                entity_id=prev_id,
+                new_severity="ok",
+                entity_name=f"Agent {prev_id}",
+                detail_for_new_severity="",
+            )
+
     if len(eligible) < OUTLIER_MIN_TEAM_SIZE:
         state.update_monitor("productivity_outliers", "ok", data={
             "team_size": len(eligible),
-            "team_mean_calls": None,
-            "team_stddev_calls": None,
+            "team_mean_calls_per_hour": None,
+            "team_stddev": None,
             "top": [], "bottom": [],
+            "excluded_count": len(excluded),
+            "excluded_names": [e["name"] for e in excluded][:10],
+            "exclude_patterns": OUTLIER_EXCLUDE_PATTERNS,
             "note": (f"Not enough agents to evaluate "
-                     f"({len(eligible)}/{OUTLIER_MIN_TEAM_SIZE}+).")
+                     f"({len(eligible)}/{OUTLIER_MIN_TEAM_SIZE}+)."),
         })
         return
 
@@ -1026,21 +1079,41 @@ def monitor_productivity_outliers(cache):
     bottom = [a for a in sorted_by_z if a["z_score"] <= -OUTLIER_STDDEV_THRESHOLD][:5]
     top = [a for a in reversed(sorted_by_z) if a["z_score"] >= OUTLIER_STDDEV_THRESHOLD][:5]
 
-    for a in bottom:
-        state.add_anomaly(
-            severity="warning", monitor="productivity_outliers",
-            title=f"Underperformer: {a['name']}",
-            detail=(f"{a['calls_per_hour']} calls/hr vs team avg {mean:.1f} "
-                    f"(z={a['z_score']:.1f})."),
-            fingerprint=f"under:{a['user_id']}",
-        )
-    for a in top:
-        state.add_anomaly(
-            severity="info", monitor="productivity_outliers",
-            title=f"Top performer: {a['name']}",
-            detail=(f"{a['calls_per_hour']} calls/hr vs team avg {mean:.1f} "
-                    f"(z={a['z_score']:.1f})."),
-            fingerprint=f"top:{a['user_id']}",
+    bottom_ids = {str(a["user_id"]) for a in bottom}
+    top_ids    = {str(a["user_id"]) for a in top}
+
+    for a in eligible:
+        aid = str(a["user_id"])
+        if aid in bottom_ids:
+            new_sev = "warning"
+            entity_name = f"Underperformer: {a['name']}"
+            detail = (f"{a['calls_per_hour']} calls/hr vs team avg "
+                      f"{mean:.1f} (z={a['z_score']:.1f}).")
+        elif aid in top_ids:
+            # Top performers are "info" - we track them with a special severity
+            # but emit only on entry, not as warning/critical.
+            prev = state.get_entity_severity("productivity_outliers", aid)
+            if prev != "top":
+                state.set_entity_severity("productivity_outliers", aid, "top")
+                state.add_anomaly(
+                    severity="info", monitor="productivity_outliers",
+                    title=f"Top performer: {a['name']}",
+                    detail=(f"{a['calls_per_hour']} calls/hr vs team avg "
+                            f"{mean:.1f} (z={a['z_score']:.1f})."),
+                    fingerprint=f"productivity_outliers:{aid}:top",
+                )
+            continue
+        else:
+            new_sev = "ok"
+            entity_name = a["name"]
+            detail = ""
+
+        state.emit_on_transition(
+            monitor="productivity_outliers",
+            entity_id=aid,
+            new_severity=new_sev,
+            entity_name=entity_name,
+            detail_for_new_severity=detail,
         )
 
     state.update_monitor("productivity_outliers", "ok", data={
@@ -1049,6 +1122,9 @@ def monitor_productivity_outliers(cache):
         "team_stddev": round(stddev, 2),
         "top": top, "bottom": bottom,
         "threshold_stddev": OUTLIER_STDDEV_THRESHOLD,
+        "excluded_count": len(excluded),
+        "excluded_names": [e["name"] for e in excluded][:10],
+        "exclude_patterns": OUTLIER_EXCLUDE_PATTERNS,
     })
 
 
