@@ -2,23 +2,25 @@
 Convoso Claude Operations Center
 
 Phase 1: Receives Convoso disposition webhooks, generates Claude summaries.
-Phase 2: Live ops dashboard with 7 monitors at /dashboard.
+Phase 2: Live ops dashboard with 9 monitors + AI briefing at /dashboard.
 
-Stage 1 monitors:
-  - Campaign continuity   (via /campaigns/search)
-  - Non-connect rate      (via /agent-performance/search)
-  - List depth (hopper)   (via /lists/search + /leads/search per list)
+Monitor inventory:
+  01 Campaign continuity   /campaigns/search
+  02 Non-connect rate      /agent-performance/search aggregated
+  03 Hopper depth          /lists/search + /leads/search per list
+  04 Idle agents           /agent-performance/search wait_sec_pt
+  05 Connect rate by list  /agent-performance/search with list_ids
+  06 AM ratio drift        /agent-performance/search + history
+  07 Productivity outliers /agent-performance/search (inbound-filtered)
+  08 Talk-time anomalies   /agent-performance/search talk_sec_pt
+  09 Pause-time anomalies  /agent-performance/search pause_sec_pt
+  10 Claude AI briefing    every N minutes; analyst-style summary
 
-Stage 2 monitors:
-  - Idle agents           (via /agent-performance/search wait_sec_pt)
-  - Connect rate by list  (via /agent-performance/search with list_ids)
-  - AM ratio drift        (via /agent-performance/search + history)
-  - Productivity outliers (via /agent-performance/search; excludes inbound)
-
-Polish (v0.6):
-  - Inbound agents (Custo / Manager / Sup) excluded from outliers
-  - Anomalies fire only on state transitions, not every poll
-  - Resolved transitions emit "info" anomalies for visibility
+v1.0 changes from v0.6:
+  - Two new monitors (talk time, pause time)
+  - Background scheduler for Claude briefing
+  - State endpoint exposes briefing
+  - POST /api/briefing/refresh for manual regeneration
 """
 
 import json
@@ -55,7 +57,9 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 CONVOSO_API_BASE = "https://api.convoso.com/v1"
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
+BRIEFING_INTERVAL_MINUTES = int(os.environ.get("BRIEFING_INTERVAL_MINUTES", "10"))
 
+# --- thresholds ---
 NON_CONNECT_WARN_THRESHOLD = float(os.environ.get("NON_CONNECT_WARN_THRESHOLD", "0.65"))
 NON_CONNECT_CRIT_THRESHOLD = float(os.environ.get("NON_CONNECT_CRIT_THRESHOLD", "0.80"))
 
@@ -76,8 +80,18 @@ AM_DRIFT_MIN_HISTORY = int(os.environ.get("AM_DRIFT_MIN_HISTORY", "10"))
 OUTLIER_MIN_TEAM_SIZE = int(os.environ.get("OUTLIER_MIN_TEAM_SIZE", "5"))
 OUTLIER_STDDEV_THRESHOLD = float(os.environ.get("OUTLIER_STDDEV_THRESHOLD", "2.0"))
 
-# Inbound / non-dialer name patterns. Case-insensitive substring match.
-# Override with comma-separated patterns in OUTLIER_EXCLUDE_PATTERNS env var.
+# Talk-time: agents stuck on a long call or barely talking
+TALK_TIME_HIGH_WARN = float(os.environ.get("TALK_TIME_HIGH_WARN", "85"))   # >85% talk = possible stuck call
+TALK_TIME_HIGH_CRIT = float(os.environ.get("TALK_TIME_HIGH_CRIT", "92"))
+TALK_TIME_LOW_WARN  = float(os.environ.get("TALK_TIME_LOW_WARN",  "3"))    # <3% talk for >30min = quiet
+TALK_TIME_LOW_CRIT  = float(os.environ.get("TALK_TIME_LOW_CRIT",  "1"))
+TALK_TIME_MIN_LOGGED_SECONDS = 1800    # only evaluate after 30 min logged in
+
+# Pause-time: extended breaks / AFK
+PAUSE_TIME_WARN = float(os.environ.get("PAUSE_TIME_WARN", "15"))
+PAUSE_TIME_CRIT = float(os.environ.get("PAUSE_TIME_CRIT", "25"))
+PAUSE_TIME_MIN_LOGGED_SECONDS = 1800
+
 DEFAULT_EXCLUDE_PATTERNS = "custo,customer,inbound,manager,sup,supervisor,trainer,training,test,admin,qa"
 OUTLIER_EXCLUDE_PATTERNS = [
     p.strip().lower()
@@ -96,7 +110,7 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY els
 
 
 # ---------------------------------------------------------------------------
-# State store with transition tracking
+# State store
 # ---------------------------------------------------------------------------
 
 MONITOR_NAMES = [
@@ -107,6 +121,8 @@ MONITOR_NAMES = [
     "connect_rate_by_list",
     "am_ratio_drift",
     "productivity_outliers",
+    "talk_time_anomalies",
+    "pause_time_anomalies",
 ]
 
 
@@ -127,9 +143,13 @@ class StateStore:
             "active_campaigns": deque(maxlen=HISTORY_MAX_POINTS),
             "logged_in_agents": deque(maxlen=HISTORY_MAX_POINTS),
         }
-        # Per-monitor entity severity tracking for state-transition anomalies.
-        # Shape: {monitor_name: {entity_id: severity_string}}
         self.entity_severity = {}
+        self.briefing = {
+            "text": None,
+            "generated_at": None,
+            "generating": False,
+            "error": None,
+        }
 
     def update_monitor(self, name, status, data=None, error=None):
         with self.lock:
@@ -182,15 +202,11 @@ class StateStore:
 
     def emit_on_transition(self, monitor, entity_id, new_severity,
                            entity_name, detail_for_new_severity):
-        """Emit anomaly only when an entity's severity changes. Resolutions
-        (warning/critical -> ok) emit an 'info' anomaly so the operator sees
-        the closure event. Returns True if an anomaly was emitted."""
         prev_severity = self.get_entity_severity(monitor, entity_id)
         if prev_severity == new_severity:
             return False
         self.set_entity_severity(monitor, entity_id, new_severity)
 
-        # Going to a worse state - emit an alert at that severity
         if new_severity in ("warning", "critical"):
             self.add_anomaly(
                 severity=new_severity, monitor=monitor,
@@ -200,7 +216,6 @@ class StateStore:
             )
             return True
 
-        # Returning to ok from a non-ok state - emit a resolution event
         if new_severity == "ok" and prev_severity in ("warning", "critical"):
             self.add_anomaly(
                 severity="info", monitor=monitor,
@@ -209,8 +224,22 @@ class StateStore:
                 fingerprint=f"{monitor}:{entity_id}:resolved",
             )
             return True
-
         return False
+
+    def set_briefing(self, text=None, error=None, generating=None):
+        with self.lock:
+            if generating is not None:
+                self.briefing["generating"] = generating
+            if text is not None:
+                self.briefing["text"] = text
+                self.briefing["generated_at"] = datetime.now(timezone.utc).isoformat()
+                self.briefing["error"] = None
+            if error is not None:
+                self.briefing["error"] = error
+
+    def get_briefing(self):
+        with self.lock:
+            return dict(self.briefing)
 
     def snapshot(self):
         with self.lock:
@@ -223,6 +252,7 @@ class StateStore:
                 "monitors": dict(self.monitors),
                 "anomalies": list(self.anomalies)[:50],
                 "history": history_out,
+                "briefing": dict(self.briefing),
             }
 
 
@@ -230,7 +260,7 @@ state = StateStore()
 
 
 # ---------------------------------------------------------------------------
-# Convoso API client
+# Convoso API
 # ---------------------------------------------------------------------------
 
 class ConvosoAPIError(Exception):
@@ -422,12 +452,23 @@ def is_active_status(status_val):
 
 
 def is_excluded_agent(name):
-    """True if the agent name matches any of the exclude patterns
-    (inbound, custo, manager, etc.)."""
     if not name:
         return False
     name_lower = name.lower()
     return any(p in name_lower for p in OUTLIER_EXCLUDE_PATTERNS)
+
+
+def parse_hms(s):
+    if not s:
+        return None
+    try:
+        parts = str(s).split(":")
+        if len(parts) != 3:
+            return None
+        h, m, sec = (int(p) for p in parts)
+        return h * 3600 + m * 60 + sec
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_agent_performance(cache, list_ids=None):
@@ -508,7 +549,6 @@ def monitor_campaign_pauses(cache):
             active = bool(active)
         summary.append({"id": cid, "name": name, "active": active})
 
-    # Use transition tracking for pause/resume events
     for c in summary:
         new_severity = "ok" if c["active"] else "warning"
         state.emit_on_transition(
@@ -596,7 +636,6 @@ def monitor_non_connect_rate(cache):
     elif rate >= NON_CONNECT_WARN_THRESHOLD:
         severity = "warning"
 
-    # Single-entity transition: the whole team's non-connect rate.
     state.emit_on_transition(
         monitor="non_connect_rate",
         entity_id="team",
@@ -624,7 +663,7 @@ def monitor_non_connect_rate(cache):
 
 
 # ---------------------------------------------------------------------------
-# Monitor 03: Hopper depth (lists)
+# Monitor 03: Hopper depth
 # ---------------------------------------------------------------------------
 
 def count_leads_in_list(list_id):
@@ -682,12 +721,10 @@ def monitor_hopper_depletion(cache):
     errors_per_list = []
     max_lists_per_poll = int(os.environ.get("HOPPER_MAX_LISTS_PER_POLL", "20"))
     checked = active_lists[:max_lists_per_poll]
-    checked_ids = set()
 
     for L in checked:
         list_id = L.get("id")
         list_name = L.get("name") or f"List {list_id}"
-        checked_ids.add(str(list_id))
         try:
             total = count_leads_in_list(list_id)
         except ConvosoAPIError as e:
@@ -860,7 +897,6 @@ def monitor_connect_rate_by_list(cache):
                     "calls": 0, "human_answered": 0, "rate": None,
                     "ts_epoch": now, "note": "No agent activity on this list.",
                 }
-            # No data == treat as ok severity
             state.emit_on_transition(
                 monitor="connect_rate_by_list", entity_id=list_id,
                 new_severity="ok",
@@ -964,8 +1000,7 @@ def monitor_am_ratio_drift(cache):
         new_severity=severity,
         entity_name=f"AM ratio spike: {current*100:.1f}% (baseline {baseline*100:.1f}%)",
         detail_for_new_severity=(
-            f"Answering-machine ratio is "
-            f"{ratio_to_baseline:.2f}x the recent baseline."
+            f"Answering-machine ratio is {ratio_to_baseline:.2f}x the recent baseline."
             if ratio_to_baseline is not None else ""
         ),
     )
@@ -982,21 +1017,8 @@ def monitor_am_ratio_drift(cache):
 
 
 # ---------------------------------------------------------------------------
-# Monitor 07: Productivity outliers (with inbound filter)
+# Monitor 07: Productivity outliers
 # ---------------------------------------------------------------------------
-
-def parse_hms(s):
-    if not s:
-        return None
-    try:
-        parts = str(s).split(":")
-        if len(parts) != 3:
-            return None
-        h, m, sec = (int(p) for p in parts)
-        return h * 3600 + m * 60 + sec
-    except (TypeError, ValueError):
-        return None
-
 
 def monitor_productivity_outliers(cache):
     try:
@@ -1029,13 +1051,10 @@ def monitor_productivity_outliers(cache):
             "human_answered": int(_to_number(stats.get("human_answered")) or 0),
         })
 
-    # Clear previous outlier transitions for agents that are no longer eligible
-    # so resolved events fire when they leave the cohort.
     previous_severities = state.all_entity_severities("productivity_outliers")
     eligible_ids = {str(a["user_id"]) for a in eligible}
     for prev_id, prev_sev in previous_severities.items():
         if prev_id not in eligible_ids and prev_sev in ("warning", "critical"):
-            # Agent no longer in cohort - resolve
             state.emit_on_transition(
                 monitor="productivity_outliers",
                 entity_id=prev_id,
@@ -1090,8 +1109,6 @@ def monitor_productivity_outliers(cache):
             detail = (f"{a['calls_per_hour']} calls/hr vs team avg "
                       f"{mean:.1f} (z={a['z_score']:.1f}).")
         elif aid in top_ids:
-            # Top performers are "info" - we track them with a special severity
-            # but emit only on entry, not as warning/critical.
             prev = state.get_entity_severity("productivity_outliers", aid)
             if prev != "top":
                 state.set_entity_severity("productivity_outliers", aid, "top")
@@ -1129,6 +1146,387 @@ def monitor_productivity_outliers(cache):
 
 
 # ---------------------------------------------------------------------------
+# Monitor 08: Talk time anomalies
+# Detects agents whose talk_sec_pt is unusually high (stuck on a call) or
+# unusually low (barely talking despite being logged in).
+# ---------------------------------------------------------------------------
+
+def monitor_talk_time_anomalies(cache):
+    try:
+        agents = fetch_agent_performance(cache)
+    except ConvosoAPIError as e:
+        state.update_monitor("talk_time_anomalies", "error", error=str(e))
+        return
+
+    high_talkers = []    # potentially stuck on call
+    quiet_talkers = []   # below floor of acceptable
+    excluded_count = 0
+
+    for agent_id, stats in agents.items():
+        if not isinstance(stats, dict):
+            continue
+        name = stats.get("name") or f"Agent {agent_id}"
+        talk_pct = _to_number(stats.get("talk_sec_pt"))
+        total_sec = parse_hms(stats.get("total_time"))
+        calls = _to_number(stats.get("calls")) or 0
+        if talk_pct is None or total_sec is None:
+            continue
+        if total_sec < TALK_TIME_MIN_LOGGED_SECONDS:
+            continue
+        if is_excluded_agent(name):
+            excluded_count += 1
+            continue
+
+        severity = "ok"
+        category = None
+        if talk_pct >= TALK_TIME_HIGH_CRIT:
+            severity, category = "critical", "high"
+        elif talk_pct >= TALK_TIME_HIGH_WARN:
+            severity, category = "warning", "high"
+        elif talk_pct <= TALK_TIME_LOW_CRIT:
+            severity, category = "critical", "low"
+        elif talk_pct <= TALK_TIME_LOW_WARN:
+            severity, category = "warning", "low"
+
+        state.emit_on_transition(
+            monitor="talk_time_anomalies",
+            entity_id=agent_id,
+            new_severity=severity,
+            entity_name=(f"Stuck on call: {name}" if category == "high"
+                         else f"Barely talking: {name}" if category == "low"
+                         else name),
+            detail_for_new_severity=(
+                f"{talk_pct:.1f}% of logged-in time on call ({int(calls)} calls)."
+                if category == "high"
+                else f"Only {talk_pct:.1f}% talk time across {int(calls)} calls."
+                if category == "low"
+                else ""
+            ),
+        )
+
+        if severity in ("warning", "critical"):
+            entry = {
+                "user_id": agent_id,
+                "name": name,
+                "talk_pct": talk_pct,
+                "calls": int(calls),
+                "total_time": stats.get("total_time"),
+                "severity": severity,
+            }
+            if category == "high":
+                high_talkers.append(entry)
+            else:
+                quiet_talkers.append(entry)
+
+    state.update_monitor("talk_time_anomalies", "ok", data={
+        "high_talkers": sorted(high_talkers, key=lambda x: -x["talk_pct"])[:10],
+        "quiet_talkers": sorted(quiet_talkers, key=lambda x: x["talk_pct"])[:10],
+        "high_warn_threshold": TALK_TIME_HIGH_WARN,
+        "high_crit_threshold": TALK_TIME_HIGH_CRIT,
+        "low_warn_threshold": TALK_TIME_LOW_WARN,
+        "low_crit_threshold": TALK_TIME_LOW_CRIT,
+        "excluded_count": excluded_count,
+        "total_flagged": len(high_talkers) + len(quiet_talkers),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Monitor 09: Pause time anomalies
+# Detects agents whose pause_sec_pt is excessive (long breaks / AFK).
+# ---------------------------------------------------------------------------
+
+def monitor_pause_time_anomalies(cache):
+    try:
+        agents = fetch_agent_performance(cache)
+    except ConvosoAPIError as e:
+        state.update_monitor("pause_time_anomalies", "error", error=str(e))
+        return
+
+    flagged = []
+    excluded_count = 0
+
+    for agent_id, stats in agents.items():
+        if not isinstance(stats, dict):
+            continue
+        name = stats.get("name") or f"Agent {agent_id}"
+        pause_pct = _to_number(stats.get("pause_sec_pt"))
+        total_sec = parse_hms(stats.get("total_time"))
+        if pause_pct is None or total_sec is None:
+            continue
+        if total_sec < PAUSE_TIME_MIN_LOGGED_SECONDS:
+            continue
+        if is_excluded_agent(name):
+            excluded_count += 1
+            continue
+
+        severity = "ok"
+        if pause_pct >= PAUSE_TIME_CRIT:
+            severity = "critical"
+        elif pause_pct >= PAUSE_TIME_WARN:
+            severity = "warning"
+
+        state.emit_on_transition(
+            monitor="pause_time_anomalies",
+            entity_id=agent_id,
+            new_severity=severity,
+            entity_name=f"Extended break: {name}",
+            detail_for_new_severity=(
+                f"{pause_pct:.1f}% of logged-in time in pause state."
+            ),
+        )
+
+        if severity in ("warning", "critical"):
+            flagged.append({
+                "user_id": agent_id,
+                "name": name,
+                "pause_pct": pause_pct,
+                "total_time": stats.get("total_time"),
+                "severity": severity,
+            })
+
+    state.update_monitor("pause_time_anomalies", "ok", data={
+        "flagged": sorted(flagged, key=lambda x: -x["pause_pct"])[:10],
+        "total_flagged": len(flagged),
+        "warn_threshold": PAUSE_TIME_WARN,
+        "crit_threshold": PAUSE_TIME_CRIT,
+        "excluded_count": excluded_count,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Monitor 10: Claude AI briefing
+# ---------------------------------------------------------------------------
+
+BRIEFING_SYSTEM_PROMPT = """You are a senior call center operations analyst writing a real-time briefing for an operations manager at a health insurance call center.
+
+You will be given a snapshot of the current dialer state plus recent history. Write a concise briefing (2-3 short paragraphs, total ~120-180 words) in flowing editorial prose.
+
+Cover, in order:
+1. One sentence on overall operational health
+2. The most urgent issue(s) requiring attention, with context for why they matter
+3. Notable trends or patterns in the recent data, with brief interpretation
+4. ONE specific recommended action
+
+Style:
+- Professional, calm, like a daily news brief
+- Flowing prose only - no bullets, headers, lists, or markdown
+- Be specific with numbers when relevant ("4,400 calls dialed", not "many calls")
+- Apply call center domain knowledge to interpret what numbers MEAN. For example: rising AM ratio + steady dialing volume often signals stale list data or DID flagging. High wait time across multiple agents usually means dialer pacing issue, not agent behavior.
+- Look for relationships BETWEEN metrics
+- Don't fabricate facts not in the data
+- If the situation is genuinely fine, say so plainly - don't manufacture concerns
+- Avoid clichés ("firing on all cylinders", "running smoothly", "as expected")
+- Don't preface with "based on the data" or similar - just write the analysis
+
+Output ONLY the briefing prose. No greeting, no signature, no preamble."""
+
+
+def build_briefing_context(snapshot):
+    """Format the dashboard state into a structured prompt for Claude."""
+    monitors = snapshot.get("monitors", {})
+    history = snapshot.get("history", {})
+
+    parts = []
+
+    # Time
+    ts = snapshot.get("last_poll_at") or datetime.now(timezone.utc).isoformat()
+    parts.append(f"Time: {ts}")
+
+    # Campaigns
+    c = monitors.get("campaign_pauses", {}).get("data") or {}
+    if c:
+        names_active = [x["name"] for x in c.get("campaigns", []) if x.get("active")]
+        names_paused = [x["name"] for x in c.get("campaigns", []) if not x.get("active")]
+        parts.append(
+            f"\nCAMPAIGNS: {c.get('active', 0)} active of {c.get('total', 0)} total."
+            + (f"\n  Active: {', '.join(names_active)}." if names_active else "")
+            + (f"\n  Paused: {', '.join(names_paused)}." if names_paused else "")
+        )
+
+    # Dialing
+    n = monitors.get("non_connect_rate", {}).get("data") or {}
+    if n and n.get("total_calls"):
+        parts.append(
+            f"\nDIALING TODAY: {n['total_calls']:,} calls."
+            f"\n  Live answers: {n.get('human_answered', 0):,}"
+            f" ({(n.get('human_answered', 0)/n['total_calls']*100):.1f}%)"
+            f"\n  Answering machine: {n.get('am', 0):,}"
+            f" ({(n.get('am', 0)/n['total_calls']*100):.1f}%)"
+            f"\n  Non-connect: {n.get('non_connects', 0):,}"
+            f" ({n.get('rate', 0)*100:.1f}%)"
+            f"\n  Agents reporting: {n.get('agents_counted', 0)}"
+        )
+
+    # Agents
+    i = monitors.get("idle_agents", {}).get("data") or {}
+    if i:
+        parts.append(
+            f"\nAGENTS ON FLOOR: {i.get('logged_in', 0)} logged in,"
+            f" {i.get('active', 0)} active, {i.get('idle', 0)} idle (>90% wait time)."
+        )
+        if i.get("idle_list"):
+            idle_names = [f"{x['name']} ({x['wait_pct']:.0f}%)" for x in i["idle_list"][:5]]
+            parts.append(f"  Idle: {', '.join(idle_names)}")
+
+    # Hopper
+    h = monitors.get("hopper", {}).get("data") or {}
+    if h and isinstance(h.get("lists"), list):
+        critical = [L for L in h["lists"] if L.get("severity") == "critical"]
+        warning = [L for L in h["lists"] if L.get("severity") == "warning"]
+        if critical or warning:
+            parts.append(
+                f"\nLIST HEALTH: {h.get('active_total', len(h['lists']))} active lists."
+                f"\n  Critically depleted ({len(critical)}): "
+                + (", ".join(f"{L['list_name']} ({L['remaining']} leads)"
+                             for L in critical[:5])
+                   if critical else "none")
+                + (f"\n  Warning ({len(warning)}): "
+                   + ", ".join(f"{L['list_name']} ({L['remaining']} leads)"
+                               for L in warning[:5])
+                   if warning else "")
+            )
+
+    # Connect rate by list
+    cr = monitors.get("connect_rate_by_list", {}).get("data") or {}
+    if cr.get("lists"):
+        evaluated = [L for L in cr["lists"]
+                     if L.get("rate") is not None and L.get("calls", 0) >= cr.get("min_calls_to_evaluate", 0)]
+        if evaluated:
+            worst = evaluated[0]
+            parts.append(
+                f"\nCONNECT RATE: lowest is {worst['list_name']} at "
+                f"{worst['rate']*100:.1f}% ({worst.get('calls', 0)} calls)."
+                f" Lists checked: {cr.get('checked_so_far', 0)}/{cr.get('active_total', 0)}."
+            )
+
+    # AM drift
+    a = monitors.get("am_ratio_drift", {}).get("data") or {}
+    if a and a.get("current") is not None:
+        if a.get("baseline") is not None:
+            parts.append(
+                f"\nAM RATIO: {a['current']*100:.1f}% currently,"
+                f" {a['baseline']*100:.1f}% rolling baseline"
+                f" (ratio {a.get('ratio_to_baseline', 1):.2f}x)."
+            )
+        else:
+            parts.append(f"\nAM RATIO: {a['current']*100:.1f}% (baseline still building).")
+
+    # Outliers
+    o = monitors.get("productivity_outliers", {}).get("data") or {}
+    if o.get("team_mean_calls_per_hour"):
+        underperformers = o.get("bottom", []) or []
+        top = o.get("top", []) or []
+        parts.append(
+            f"\nPRODUCTIVITY: team avg {o['team_mean_calls_per_hour']} calls/hr"
+            f" across {o.get('team_size', 0)} dialers."
+            + (f"\n  Underperformers: " + ", ".join(
+                f"{a['name']} ({a['calls_per_hour']} c/hr)"
+                for a in underperformers
+            ) if underperformers else "")
+            + (f"\n  Top performers: " + ", ".join(
+                f"{a['name']} ({a['calls_per_hour']} c/hr)"
+                for a in top
+            ) if top else "")
+        )
+
+    # Talk time anomalies
+    t = monitors.get("talk_time_anomalies", {}).get("data") or {}
+    if t.get("total_flagged"):
+        stuck = t.get("high_talkers", [])
+        quiet = t.get("quiet_talkers", [])
+        if stuck:
+            parts.append(
+                "\nPOSSIBLY STUCK ON CALL: "
+                + ", ".join(f"{a['name']} ({a['talk_pct']:.0f}% talk)" for a in stuck[:5])
+            )
+        if quiet:
+            parts.append(
+                "\nBARELY TALKING: "
+                + ", ".join(f"{a['name']} ({a['talk_pct']:.1f}% talk)" for a in quiet[:5])
+            )
+
+    # Pause time
+    p = monitors.get("pause_time_anomalies", {}).get("data") or {}
+    if p.get("total_flagged"):
+        flagged = p.get("flagged", [])
+        parts.append(
+            "\nEXTENDED BREAKS: "
+            + ", ".join(f"{a['name']} ({a['pause_pct']:.0f}% pause)" for a in flagged[:5])
+        )
+
+    # Trends - describe direction over the available history
+    def describe_series(name, label, fmt=lambda v: f"{v:.2f}"):
+        series = history.get(name, [])
+        if len(series) < 3:
+            return None
+        values = [p.get("value") for p in series if p.get("value") is not None]
+        if len(values) < 3:
+            return None
+        first_third = statistics.mean(values[:len(values) // 3]) if len(values) >= 6 else values[0]
+        last_third = statistics.mean(values[-(len(values) // 3):]) if len(values) >= 6 else values[-1]
+        change = last_third - first_third
+        latest = values[-1]
+        direction = "stable"
+        if first_third > 0.0001 and abs(change / first_third) > 0.10:
+            direction = "rising" if change > 0 else "falling"
+        return (f"{label}: latest {fmt(latest)}, "
+                f"{direction} over last ~30min "
+                f"(early avg {fmt(first_third)}, recent avg {fmt(last_third)}).")
+
+    trend_lines = []
+    nc = describe_series("non_connect_rate", "Non-connect rate", lambda v: f"{v*100:.1f}%")
+    if nc: trend_lines.append(nc)
+    am = describe_series("am_ratio", "AM ratio", lambda v: f"{v*100:.1f}%")
+    if am: trend_lines.append(am)
+    ag = describe_series("logged_in_agents", "Logged-in agents", lambda v: f"{int(v)}")
+    if ag: trend_lines.append(ag)
+    if trend_lines:
+        parts.append("\nTRENDS (last 30 min):\n  " + "\n  ".join(trend_lines))
+
+    return "\n".join(parts)
+
+
+def generate_claude_briefing():
+    """Background job: snapshot state, call Claude, store the briefing."""
+    if not claude:
+        state.set_briefing(error="Anthropic API key not configured.")
+        return
+    try:
+        snapshot = state.snapshot()
+
+        # Skip if monitors haven't completed a successful poll yet
+        if not snapshot.get("last_poll_at"):
+            log.info("Briefing skipped - no monitor poll yet")
+            return
+
+        # Skip if all monitors are still pending/errored
+        ok_count = sum(
+            1 for m in snapshot.get("monitors", {}).values()
+            if m.get("status") == "ok"
+        )
+        if ok_count == 0:
+            log.info("Briefing skipped - no monitors in ok state")
+            return
+
+        state.set_briefing(generating=True)
+        context = build_briefing_context(snapshot)
+        log.info("Generating Claude briefing (context: %d chars)", len(context))
+
+        response = claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=600,
+            system=BRIEFING_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": context}],
+        )
+        text = response.content[0].text.strip()
+        state.set_briefing(text=text, generating=False)
+        log.info("Briefing generated (%d chars)", len(text))
+    except Exception as e:
+        log.exception("Briefing generation failed")
+        state.set_briefing(error=f"Briefing generation failed: {e}", generating=False)
+
+
+# ---------------------------------------------------------------------------
 # Background poller
 # ---------------------------------------------------------------------------
 
@@ -1140,6 +1538,8 @@ MONITORS_ORDERED = [
     ("connect_rate_by_list",   monitor_connect_rate_by_list),
     ("am_ratio_drift",         monitor_am_ratio_drift),
     ("productivity_outliers",  monitor_productivity_outliers),
+    ("talk_time_anomalies",    monitor_talk_time_anomalies),
+    ("pause_time_anomalies",   monitor_pause_time_anomalies),
 ]
 
 
@@ -1172,9 +1572,16 @@ def start_scheduler():
     sched.add_job(run_all_monitors, "interval",
                   seconds=POLL_INTERVAL_SECONDS,
                   next_run_time=datetime.now(),
-                  max_instances=1, coalesce=True)
+                  max_instances=1, coalesce=True,
+                  id="monitors")
+    sched.add_job(generate_claude_briefing, "interval",
+                  minutes=BRIEFING_INTERVAL_MINUTES,
+                  next_run_time=datetime.now() + timedelta(seconds=90),
+                  max_instances=1, coalesce=True,
+                  id="briefing")
     sched.start()
-    log.info("Scheduler started: polling every %ss", POLL_INTERVAL_SECONDS)
+    log.info("Scheduler started: monitors=%ss briefing=%smin",
+             POLL_INTERVAL_SECONDS, BRIEFING_INTERVAL_MINUTES)
 
 
 _scheduler_started = False
@@ -1200,13 +1607,14 @@ def health():
         "service": "convoso-claude-summary",
         "status": "running",
         "endpoints": {
-            "POST /webhook":     "Receives Convoso disposition webhooks (Phase 1)",
-            "GET /dashboard":    "Live operations dashboard (Phase 2)",
-            "GET /api/state":    "JSON state snapshot used by dashboard",
-            "GET /api/diagnose": "Probes Convoso endpoints to verify availability",
-            "GET /api/probe":    "Inspect a single Convoso endpoint response shape",
-            "POST /api/poll":    "Force an immediate monitor poll",
-            "GET /":             "This health check",
+            "POST /webhook":              "Receives Convoso disposition webhooks (Phase 1)",
+            "GET /dashboard":             "Live operations dashboard (Phase 2)",
+            "GET /api/state":             "JSON state snapshot used by dashboard",
+            "GET /api/diagnose":          "Probes Convoso endpoints",
+            "GET /api/probe":             "Inspect a single Convoso endpoint",
+            "POST /api/poll":             "Force an immediate monitor poll",
+            "POST /api/briefing/refresh": "Force an immediate Claude briefing regeneration",
+            "GET /":                      "This health check",
         },
     })
 
@@ -1311,6 +1719,23 @@ def api_probe():
 def api_poll():
     run_all_monitors()
     return jsonify({"ok": True, "snapshot": state.snapshot()})
+
+
+@app.route("/api/briefing/refresh", methods=["POST", "GET"])
+def api_briefing_refresh():
+    """Trigger a Claude briefing regeneration on demand. Runs in a thread so
+    the request returns immediately."""
+    t = threading.Thread(target=generate_claude_briefing, daemon=True)
+    t.start()
+    return jsonify({"ok": True, "message": "Briefing regeneration started",
+                    "current": state.get_briefing()})
+
+
+@app.route("/api/briefing/preview-context", methods=["GET"])
+def api_briefing_preview():
+    """Returns the structured context that would be sent to Claude (for
+    debugging the prompt)."""
+    return jsonify({"context": build_briefing_context(state.snapshot())})
 
 
 if __name__ == "__main__":
