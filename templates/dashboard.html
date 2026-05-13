@@ -197,9 +197,9 @@
     background: var(--bone);
     border-right: 1px solid var(--hairline-strong);
     border-bottom: 1px solid var(--hairline-strong);
-    padding: 28px 28px 32px;
+    padding: 26px 26px 28px;
     position: relative;
-    min-height: 240px;
+    min-height: 220px;
     display: flex;
     flex-direction: column;
     transition: background 280ms ease;
@@ -221,9 +221,9 @@
   .card h3 {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 23px;
+    font-size: 22px;
     line-height: 1.15;
-    margin: 8px 0 18px;
+    margin: 8px 0 16px;
     letter-spacing: -0.005em;
   }
 
@@ -236,7 +236,7 @@
   .metric .big {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: 58px;
+    font-size: 54px;
     line-height: 1;
     letter-spacing: -0.02em;
     font-feature-settings: "lnum", "tnum";
@@ -244,19 +244,19 @@
   .metric .unit {
     font-family: var(--serif);
     font-style: italic;
-    font-size: 20px;
+    font-size: 19px;
     color: var(--ink-soft);
   }
 
   .breakdown {
-    margin-top: 18px;
-    padding-top: 14px;
+    margin-top: 16px;
+    padding-top: 12px;
     border-top: 1px dashed var(--hairline);
     display: flex;
-    gap: 22px;
+    gap: 18px;
     flex-wrap: wrap;
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--ink-faint);
@@ -284,8 +284,8 @@
 
   .card-tag {
     position: absolute;
-    top: 28px;
-    right: 28px;
+    top: 26px;
+    right: 26px;
     font-family: var(--mono);
     font-size: 10px;
     letter-spacing: 0.2em;
@@ -301,9 +301,9 @@
   .card-tag.idle  { color: var(--ink-faint); }
 
   .sparkline {
-    margin-top: 12px;
+    margin-top: 10px;
     margin-bottom: -4px;
-    height: 36px;
+    height: 32px;
     width: 100%;
     display: block;
   }
@@ -323,71 +323,172 @@
   .card.crit .sparkline .line { stroke: var(--crit); }
   .card.crit .sparkline .area { fill: rgba(140, 47, 47, 0.18); }
 
-  .outliers {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 32px;
+  /* Compact outliers and agent lists for cards */
+  .agent-list {
     margin-top: auto;
   }
-  .outliers h4 {
+  .agent-list h4 {
     font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.24em;
+    font-size: 9px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--ink-faint);
-    margin: 0 0 10px;
+    margin: 0 0 6px;
   }
-  .outliers ul {
+  .agent-list ul {
     list-style: none;
     padding: 0;
-    margin: 0;
+    margin: 0 0 8px;
   }
-  .outliers li {
+  .agent-list li {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    padding: 5px 0;
-    border-bottom: 1px dashed var(--hairline);
-    font-size: 13px;
+    padding: 3px 0;
+    font-size: 12px;
   }
-  .outliers li:last-child { border-bottom: none; }
-  .outliers .name {
+  .agent-list .name {
     font-family: var(--serif);
-    font-size: 16px;
+    font-size: 14px;
     font-style: italic;
   }
-  .outliers .stat {
+  .agent-list .stat {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 10px;
     color: var(--ink-soft);
   }
-  .outliers .empty {
+  .agent-list .empty {
     color: var(--ink-faint);
     font-style: italic;
     font-family: var(--serif);
+    font-size: 13px;
   }
 
-  /* Excluded agents footnote */
   .excluded-note {
-    margin-top: 14px;
-    padding: 8px 12px;
+    margin-top: 12px;
+    padding: 6px 10px;
     border-left: 2px solid var(--gold);
     background: rgba(184, 146, 75, 0.06);
     font-family: var(--serif);
     font-style: italic;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--ink-soft);
-    line-height: 1.4;
+    line-height: 1.35;
   }
   .excluded-note b {
     font-family: var(--mono);
     font-style: normal;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--gold);
     display: block;
     margin-bottom: 2px;
+  }
+
+  /* Claude Briefing Section */
+  .briefing-section {
+    margin-top: 64px;
+    border-top: 1px solid var(--hairline-strong);
+    padding-top: 32px;
+  }
+  .briefing-card {
+    background: var(--bone);
+    border: 1px solid var(--hairline-strong);
+    padding: 40px 48px 36px;
+    position: relative;
+    min-height: 280px;
+  }
+  .briefing-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 24px;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .briefing-byline {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .briefing-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .briefing-refresh-btn {
+    background: transparent;
+    border: 1px solid var(--hairline-strong);
+    color: var(--ink-soft);
+    padding: 6px 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 200ms ease;
+  }
+  .briefing-refresh-btn:hover {
+    background: var(--gold);
+    color: var(--bone);
+    border-color: var(--gold);
+  }
+  .briefing-refresh-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .briefing-content {
+    font-family: var(--serif);
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--ink);
+    column-count: 2;
+    column-gap: 48px;
+    column-rule: 1px solid var(--hairline);
+  }
+  .briefing-content p {
+    margin: 0 0 16px;
+    text-indent: 0;
+    break-inside: avoid;
+  }
+  .briefing-content p:first-of-type::first-letter {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 56px;
+    line-height: 0.85;
+    float: left;
+    margin: 6px 8px -4px 0;
+    color: var(--gold);
+  }
+  .briefing-empty {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 19px;
+    color: var(--ink-faint);
+    text-align: center;
+    padding: 32px 0;
+  }
+  .briefing-loading {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gold);
+    margin-left: 8px;
+    animation: blink 1s infinite;
+    vertical-align: middle;
+  }
+  @keyframes blink {
+    0%, 50%, 100% { opacity: 0.3; }
+    25%, 75%      { opacity: 1; }
   }
 
   .feed {
@@ -437,7 +538,6 @@
     font-size: 13px;
     color: var(--ink-soft);
   }
-  /* Resolved entries get a quieter look */
   .feed-row.resolved .title { color: var(--ink-soft); }
   .feed-row.resolved .body::after {
     content: "·  resolved";
@@ -490,6 +590,7 @@
 
   @media (max-width: 1100px) {
     .monitors { grid-template-columns: repeat(2, 1fr); }
+    .briefing-content { column-count: 1; }
   }
   @media (max-width: 700px) {
     .wrap { padding: 32px 24px 64px; }
@@ -497,7 +598,8 @@
     .card { border-right: 1px solid var(--hairline-strong); }
     .feed-row { grid-template-columns: 1fr; gap: 6px; }
     .masthead { grid-template-columns: 1fr; }
-    .outliers { grid-template-columns: 1fr; }
+    .briefing-card { padding: 32px 28px; }
+    .briefing-content { font-size: 18px; }
   }
 </style>
 </head>
@@ -536,11 +638,34 @@
     <article class="card" id="card-idle_agents"><div class="eyebrow">Monitor 04</div><h3>Idle agents</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
     <article class="card" id="card-connect_rate_by_list"><div class="eyebrow">Monitor 05</div><h3>Connect rate by list</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
     <article class="card" id="card-am_ratio_drift"><div class="eyebrow">Monitor 06</div><h3>AM ratio drift</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
-    <article class="card" id="card-productivity_outliers" style="grid-column: span 3;"><div class="eyebrow">Monitor 07</div><h3>Productivity outliers</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-productivity_outliers"><div class="eyebrow">Monitor 07</div><h3>Productivity outliers</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-talk_time_anomalies"><div class="eyebrow">Monitor 08</div><h3>Talk time anomalies</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
+    <article class="card" id="card-pause_time_anomalies"><div class="eyebrow">Monitor 09</div><h3>Extended breaks</h3><div class="needs-setup-msg">Awaiting first poll&hellip;</div></article>
   </section>
 
   <div class="section-head fade-in" style="animation-delay:160ms">
     <span class="num">II.</span>
+    <h2>Operations briefing</h2>
+    <span class="rule"></span>
+  </div>
+
+  <section class="briefing-section">
+    <div class="briefing-card">
+      <div class="briefing-header">
+        <span class="briefing-byline">Drafted by Claude · Updated periodically</span>
+        <span class="briefing-meta">
+          <span id="briefing-time">Awaiting first analysis…</span>
+          <button id="briefing-refresh-btn" class="briefing-refresh-btn" onclick="forceBriefingRefresh()">Regenerate</button>
+        </span>
+      </div>
+      <div id="briefing-content" class="briefing-content">
+        <div class="briefing-empty">The briefing will appear here after the first analysis (within 1-2 minutes of the service starting).<span class="briefing-loading"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-head fade-in" style="animation-delay:240ms">
+    <span class="num">III.</span>
     <h2>Detected anomalies</h2>
     <span class="rule"></span>
   </div>
@@ -552,7 +677,7 @@
   <footer>
     <span>Southern Health · Operations</span>
     <span class="ornament">· · ·</span>
-    <span id="version-text">v0.6 · Stage 2 polished</span>
+    <span id="version-text">v1.0 · Stage 3 complete</span>
   </footer>
 
 </div>
@@ -560,8 +685,6 @@
 <script>
   const REFRESH_MS = 30000;
   let nextPollSeconds = REFRESH_MS / 1000;
-
-  // ---------- utils ----------
 
   function fmtTimeAgo(iso) {
     if (!iso) return "pending";
@@ -624,13 +747,10 @@
       </svg>`;
   }
 
-  // ---------- status pill ----------
-
   function updateStatusPill(status, anomalies) {
     const pill = document.getElementById("status-pill");
     const label = document.getElementById("status-label");
     pill.className = "status-pill";
-    // Look at only recent anomalies for pill state (last 5 min)
     const cutoff = Date.now() / 1000 - 300;
     const recent = anomalies.filter(a => (a.ts_epoch || 0) >= cutoff);
     const critCount = recent.filter(a => a.severity === "critical").length;
@@ -650,8 +770,6 @@
     }
   }
 
-  // ---------- card render shell ----------
-
   function renderCard(elemId, eyebrow, title, monitor, bodyHTML, extraSeverity) {
     const card = document.getElementById(elemId);
     const sev = extraSeverity || (monitor && monitor.data && monitor.data.severity);
@@ -666,7 +784,6 @@
     else if (sev === "critical") cardClass += " crit";
     else if (sev === "warning") cardClass += " warn";
     card.className = cardClass;
-    card.style.gridColumn = (elemId === "card-productivity_outliers") ? "span 3" : "";
     card.innerHTML = `
       <span class="card-tag ${tag}">${tagLabel(monitor.status, sev)}</span>
       <div class="eyebrow">${eyebrow}</div>
@@ -720,7 +837,6 @@
           <span>Calls<b>${d.total_calls}</b></span>
           <span>Live<b>${d.human_answered}</b></span>
           <span>AM<b>${d.am}</b></span>
-          ${d.agents_counted ? `<span>Agents<b>${d.agents_counted}</b></span>` : ""}
         </div>`;
     }
     renderCard("card-non_connect_rate", "Monitor 02", "Non-connect rate", monitor, body, sev);
@@ -742,7 +858,7 @@
             <span class="unit">leads · lowest</span>
           </div>
           <div class="breakdown">
-            <span>List<b>${escapeHtml(truncate(lowest.list_name, 22))}</b></span>
+            <span>List<b>${escapeHtml(truncate(lowest.list_name, 20))}</b></span>
             <span>Active<b>${d.active_total || d.lists.length}</b></span>
             ${criticalCount ? `<span>Critical<b>${criticalCount}</b></span>` : ""}
             ${warningCount ? `<span>Warning<b>${warningCount}</b></span>` : ""}
@@ -773,7 +889,7 @@
         <div class="breakdown">
           <span>Logged in<b>${d.logged_in}</b></span>
           <span>Active<b>${d.active}</b></span>
-          ${worst ? `<span>Worst<b>${escapeHtml(truncate(worst.name, 18))} · ${worst.wait_pct.toFixed(0)}%</b></span>` : ""}
+          ${worst ? `<span>Worst<b>${escapeHtml(truncate(worst.name, 14))} · ${worst.wait_pct.toFixed(0)}%</b></span>` : ""}
         </div>`;
     }
     renderCard("card-idle_agents", "Monitor 04", "Idle agents", monitor, body, sev);
@@ -798,8 +914,8 @@
             <span class="unit">% lowest</span>
           </div>
           <div class="breakdown">
-            <span>List<b>${escapeHtml(truncate(worst.list_name, 22))}</b></span>
-            <span>Checked<b>${d.checked_so_far} / ${d.active_total}</b></span>
+            <span>List<b>${escapeHtml(truncate(worst.list_name, 18))}</b></span>
+            <span>Checked<b>${d.checked_so_far}/${d.active_total}</b></span>
             ${critCount ? `<span>Critical<b>${critCount}</b></span>` : ""}
             ${warnCount ? `<span>Warning<b>${warnCount}</b></span>` : ""}
           </div>`;
@@ -839,7 +955,6 @@
           <div class="breakdown">
             <span>Baseline<b>${(d.baseline * 100).toFixed(1)}%</b></span>
             <span>Ratio<b>${ratio != null ? ratio.toFixed(2) + "x" : "—"}</b></span>
-            <span>Samples<b>${d.history_points}</b></span>
           </div>`;
       }
     }
@@ -852,52 +967,189 @@
     if (body == null) {
       const d = monitor.data;
       if (!d.team_mean_calls_per_hour) {
-        const excludedNote = d.excluded_count
-          ? `<div class="excluded-note"><b>Excluded</b>${d.excluded_count} inbound/non-dialer agents skipped (${escapeHtml((d.excluded_names || []).slice(0, 5).join(", "))}${d.excluded_count > 5 ? `, +${d.excluded_count - 5} more` : ""}).</div>`
-          : "";
-        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Insufficient team size.")}</div>${excludedNote}`;
+        body = `<div class="needs-setup-msg">${escapeHtml(d.note || "Insufficient team size.")}</div>`;
       } else {
-        const top = d.top || [];
         const bottom = d.bottom || [];
         if (bottom.length > 0) sev = "warning";
         const excludedNote = d.excluded_count
-          ? `<div class="excluded-note"><b>Excluded from comparison</b>${d.excluded_count} inbound/non-dialer agent${d.excluded_count > 1 ? "s" : ""}: ${escapeHtml((d.excluded_names || []).slice(0, 5).join(", "))}${d.excluded_count > 5 ? `, +${d.excluded_count - 5} more` : ""}.</div>`
+          ? `<div class="excluded-note"><b>Excluded</b>${d.excluded_count} inbound/non-dialer: ${escapeHtml((d.excluded_names || []).slice(0, 3).join(", "))}${d.excluded_count > 3 ? `, +${d.excluded_count - 3}` : ""}</div>`
           : "";
         body = `
-          <div class="outliers">
-            <div>
-              <h4>Top performers</h4>
-              <ul>
-                ${top.length === 0 ? `<li class="empty">No standouts above team average.</li>` :
-                  top.map(a => `
-                    <li>
-                      <span class="name">${escapeHtml(a.name)}</span>
-                      <span class="stat">${a.calls_per_hour} c/hr · z+${a.z_score.toFixed(1)}</span>
-                    </li>`).join("")}
-              </ul>
-            </div>
-            <div>
-              <h4>Underperformers</h4>
-              <ul>
-                ${bottom.length === 0 ? `<li class="empty">No agents below threshold.</li>` :
-                  bottom.map(a => `
-                    <li>
-                      <span class="name">${escapeHtml(a.name)}</span>
-                      <span class="stat">${a.calls_per_hour} c/hr · z${a.z_score.toFixed(1)}</span>
-                    </li>`).join("")}
-              </ul>
-            </div>
+          <div class="agent-list">
+            <h4>Underperformers</h4>
+            <ul>
+              ${bottom.length === 0 ? `<li class="empty">None flagged.</li>` :
+                bottom.slice(0, 3).map(a => `
+                  <li>
+                    <span class="name">${escapeHtml(truncate(a.name, 16))}</span>
+                    <span class="stat">${a.calls_per_hour} c/hr</span>
+                  </li>`).join("")}
+            </ul>
           </div>
-          <div class="breakdown" style="margin-top:18px;">
-            <span>Team avg<b>${d.team_mean_calls_per_hour} c/hr</b></span>
-            <span>Std dev<b>${d.team_stddev}</b></span>
-            <span>Dialers<b>${d.team_size} agents</b></span>
+          <div class="breakdown">
+            <span>Avg<b>${d.team_mean_calls_per_hour} c/hr</b></span>
+            <span>Dialers<b>${d.team_size}</b></span>
           </div>
           ${excludedNote}
         `;
       }
     }
     renderCard("card-productivity_outliers", "Monitor 07", "Productivity outliers", monitor, body, sev);
+  }
+
+  function renderTalkTimeCard(monitor) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      const stuck = d.high_talkers || [];
+      const quiet = d.quiet_talkers || [];
+      const total = stuck.length + quiet.length;
+      if (stuck.some(a => a.severity === "critical") || quiet.some(a => a.severity === "critical")) {
+        sev = "critical";
+      } else if (total > 0) {
+        sev = "warning";
+      }
+
+      if (total === 0) {
+        body = `
+          <div class="metric">
+            <span class="big">0</span>
+            <span class="unit">flagged</span>
+          </div>
+          <div class="breakdown">
+            <span>Stuck threshold<b>≥${d.high_warn_threshold}%</b></span>
+            <span>Quiet threshold<b>≤${d.low_warn_threshold}%</b></span>
+          </div>`;
+      } else {
+        body = `
+          <div class="metric" style="margin-top:0;">
+            <span class="big">${total}</span>
+            <span class="unit">flagged</span>
+          </div>
+          ${stuck.length ? `
+            <div class="agent-list" style="margin-top:14px;">
+              <h4>Possibly stuck on call</h4>
+              <ul>
+                ${stuck.slice(0, 2).map(a => `
+                  <li>
+                    <span class="name">${escapeHtml(truncate(a.name, 16))}</span>
+                    <span class="stat">${a.talk_pct.toFixed(0)}% talk</span>
+                  </li>`).join("")}
+              </ul>
+            </div>` : ""}
+          ${quiet.length ? `
+            <div class="agent-list">
+              <h4>Barely talking</h4>
+              <ul>
+                ${quiet.slice(0, 2).map(a => `
+                  <li>
+                    <span class="name">${escapeHtml(truncate(a.name, 16))}</span>
+                    <span class="stat">${a.talk_pct.toFixed(1)}% talk</span>
+                  </li>`).join("")}
+              </ul>
+            </div>` : ""}`;
+      }
+    }
+    renderCard("card-talk_time_anomalies", "Monitor 08", "Talk time anomalies", monitor, body, sev);
+  }
+
+  function renderPauseTimeCard(monitor) {
+    let body = fallbackBody(monitor);
+    let sev;
+    if (body == null) {
+      const d = monitor.data;
+      const flagged = d.flagged || [];
+      if (flagged.some(a => a.severity === "critical")) sev = "critical";
+      else if (flagged.length > 0) sev = "warning";
+
+      if (flagged.length === 0) {
+        body = `
+          <div class="metric">
+            <span class="big">0</span>
+            <span class="unit">on break</span>
+          </div>
+          <div class="breakdown">
+            <span>Warn at<b>${d.warn_threshold}%</b></span>
+            <span>Critical at<b>${d.crit_threshold}%</b></span>
+          </div>`;
+      } else {
+        body = `
+          <div class="metric" style="margin-top:0;">
+            <span class="big">${flagged.length}</span>
+            <span class="unit">on extended break</span>
+          </div>
+          <div class="agent-list" style="margin-top:14px;">
+            <h4>Most paused</h4>
+            <ul>
+              ${flagged.slice(0, 3).map(a => `
+                <li>
+                  <span class="name">${escapeHtml(truncate(a.name, 16))}</span>
+                  <span class="stat">${a.pause_pct.toFixed(0)}% pause</span>
+                </li>`).join("")}
+            </ul>
+          </div>`;
+      }
+    }
+    renderCard("card-pause_time_anomalies", "Monitor 09", "Extended breaks", monitor, body, sev);
+  }
+
+  // ---------- Claude briefing ----------
+
+  function renderBriefing(briefing) {
+    const content = document.getElementById("briefing-content");
+    const timeEl = document.getElementById("briefing-time");
+    const btn = document.getElementById("briefing-refresh-btn");
+
+    if (briefing.generating) {
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+    } else {
+      btn.disabled = false;
+      btn.textContent = "Regenerate";
+    }
+
+    if (briefing.error && !briefing.text) {
+      content.innerHTML = `<div class="briefing-empty">Briefing error: ${escapeHtml(briefing.error)}</div>`;
+      timeEl.textContent = "Error";
+      return;
+    }
+    if (!briefing.text) {
+      const msg = briefing.generating
+        ? "Analyzing operations…"
+        : "Awaiting first analysis…";
+      content.innerHTML = `<div class="briefing-empty">${msg}<span class="briefing-loading"></span></div>`;
+      timeEl.textContent = msg;
+      return;
+    }
+
+    // Split text into paragraphs
+    const paragraphs = briefing.text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    content.innerHTML = paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join("");
+    timeEl.textContent = "Generated " + fmtTimeAgo(briefing.generated_at);
+  }
+
+  async function forceBriefingRefresh() {
+    const btn = document.getElementById("briefing-refresh-btn");
+    btn.disabled = true;
+    btn.textContent = "Generating…";
+    try {
+      await fetch("/api/briefing/refresh", { method: "POST" });
+      // Poll for completion every 2 seconds
+      const start = Date.now();
+      const poll = setInterval(async () => {
+        const r = await fetch("/api/state", { cache: "no-store" });
+        const s = await r.json();
+        if (!s.briefing?.generating || Date.now() - start > 60000) {
+          clearInterval(poll);
+          renderBriefing(s.briefing);
+        }
+      }, 2000);
+    } catch (err) {
+      console.error("Force refresh failed:", err);
+      btn.disabled = false;
+      btn.textContent = "Regenerate";
+    }
   }
 
   // ---------- feed ----------
@@ -943,6 +1195,9 @@
       renderConnectRateByListCard(m.connect_rate_by_list || {status:"pending"});
       renderAmDriftCard(m.am_ratio_drift || {status:"pending"}, history);
       renderOutliersCard(m.productivity_outliers || {status:"pending"});
+      renderTalkTimeCard(m.talk_time_anomalies || {status:"pending"});
+      renderPauseTimeCard(m.pause_time_anomalies || {status:"pending"});
+      renderBriefing(snap.briefing || {});
       renderFeed(snap.anomalies);
 
       document.getElementById("last-poll-text").textContent =
