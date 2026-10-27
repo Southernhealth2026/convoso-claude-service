@@ -218,7 +218,7 @@ function renderKpis(k, live) {
       ["Contacts", n(k.contacts), "real conversations"],
       ["Sales", n(k.sales), `${k.sales_per_100 == null ? "—" : k.sales_per_100.toFixed(2)} per 100 dials`],
       ["Conversion", pct(k.close_rate), "sales / contacts"],
-      ["Avg wait", dur(live.cv_wait_avg != null ? live.cv_wait_avg : k.avg_wait), "agent idle between calls"],
+      ["Avg wait", dur(k.avg_wait), "agent idle between calls"],
       ["Avg handle", dur(k.avg_talk), "talk per contact"],
     ]],
     ["Dialing", [
