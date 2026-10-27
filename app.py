@@ -42,6 +42,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, abort, jsonify, render_template, request
 
 from insights import InsightsStore
+from live import describe_shape, fetch_live
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1711,7 +1712,43 @@ def api_insights():
         direction=request.args.get("direction", "all"),
     )
     data["loading"] = insights.last_refresh is None
+
+    # Live floor stats for the top strip
+    camp = request.args.get("campaign") or None
+    try:
+        data["live"] = fetch_live(convoso_post, campaign=camp)
+    except Exception as e:
+        log.warning("Insights: live stats failed: %s", e)
+        data["live"] = {"errors": [str(e)]}
+
+    # Average agent wait between calls, from agent-performance
+    wait_sec = 0.0
+    calls = 0.0
+    for st in (agent_perf or {}).values():
+        if not isinstance(st, dict):
+            continue
+        total = parse_hms(st.get("total_time"))
+        pct = _to_number(st.get("wait_sec_pt"))
+        n = _to_number(st.get("calls"))
+        if total and pct is not None and n:
+            wait_sec += total * pct / 100.0
+            calls += n
+    data["kpis"]["avg_wait"] = (wait_sec / calls) if calls else None
     return jsonify(data)
+
+
+@app.route("/api/live-shape", methods=["GET"])
+def api_live_shape():
+    """Field names only (no lead data) of the agent-monitor and campaign
+    responses, so the top-strip mapping can be checked."""
+    out = {}
+    for path, payload in (("/agent-monitor/search", {}),
+                          ("/campaigns/search", {"limit": 3, "offset": 0})):
+        try:
+            out[path] = describe_shape(convoso_post(path, payload))
+        except Exception as e:
+            out[path] = {"error": str(e)}
+    return jsonify(out)
 
 
 @app.route("/api/insights/refresh", methods=["POST"])

@@ -46,7 +46,13 @@
   .banner { margin-top: 18px; padding: 12px 16px; border-left: 3px solid var(--warn); background: var(--warn-bg); font-size: 13px; display: none; }
   .banner.crit { border-color: var(--crit); background: var(--crit-bg); }
 
-  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); margin-top: 26px; }
+  .kpis { margin-top: 26px; display: grid; gap: 14px; }
+  .kgroup { border: 1px solid var(--hairline); background: var(--bone); }
+  .kgroup .gname { font: 600 10px var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--gold); padding: 10px 18px 0; }
+  .krow { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); }
+  .krow .kpi + .kpi { border-left: 1px solid var(--hairline); }
+  @media (max-width: 960px) { .krow { grid-template-columns: repeat(2, minmax(0, 1fr)); } .krow .kpi { border-left: 0 !important; border-top: 1px solid var(--hairline); } }
+  .kpi .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
   .kpi { background: var(--bone); padding: 16px 18px; }
   .kpi .lbl { font: 600 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
   .kpi .val { font: 600 32px/1.1 var(--serif); margin-top: 6px; }
@@ -188,20 +194,42 @@ document.addEventListener("mousemove", (e) => {
 
 function flag(level, text) { return `<span class="flag ${level}">${text}</span>`; }
 
-function renderKpis(k) {
+function renderKpis(k, live) {
+  live = live || {};
   const drop = k.drop_rate;
   const dropFlag = drop == null ? "" : drop > 0.03 ? flag("crit", "Over 3% limit") : drop > 0.02 ? flag("warn", "Near limit") : flag("good", "OK");
-  const tiles = [
-    ["Dials", n(k.dials), ""],
-    ["Contact rate", pct(k.contact_rate), `${n(k.contacts)} conversations`],
-    ["Machine rate", pct(k.amd_rate), "answering machines / dials"],
-    ["Drop rate", pct(drop), "dropped / live answers" + "<br>" + dropFlag],
-    ["Sales", n(k.sales), `${k.sales_per_100 == null ? "—" : k.sales_per_100.toFixed(2)} per 100 dials`],
-    ["Close rate", pct(k.close_rate), "sales / conversations"],
-    ["Avg talk", dur(k.avg_talk), "per conversation"],
+  const amdFlag = k.amd_rate == null ? "" : k.amd_rate >= 0.80 ? flag("crit", "Very high") : k.amd_rate >= 0.65 ? flag("warn", "High") : "";
+  const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
+  const lv = (v) => v == null ? "—" : n(v);
+  const groups = [
+    ["Agents right now", [
+      ["Logged in", lv(live.logged_in), ""],
+      [dot("var(--c-talk)") + "In calls", lv(live.in_call), ""],
+      [dot("var(--c-wait)") + "Waiting", lv(live.waiting), ""],
+      [dot("var(--c-pause)") + "Paused", lv(live.paused), live.dispo ? `${n(live.dispo)} in dispo` : ""],
+    ]],
+    ["Today's calls", [
+      ["Calls", n(k.dials), ""],
+      ["Contacts", n(k.contacts), "real conversations"],
+      ["Sales", n(k.sales), `${k.sales_per_100 == null ? "—" : k.sales_per_100.toFixed(2)} per 100 dials`],
+      ["Conversion", pct(k.close_rate), "sales / contacts"],
+      ["Avg wait", dur(k.avg_wait), "agent idle between calls"],
+      ["Avg handle", dur(k.avg_talk), "talk per contact"],
+    ]],
+    ["Dialing", [
+      ["Dial level", live.dial_level == null ? "—" : Number(live.dial_level).toFixed(1), ""],
+      ["Dialable leads", lv(live.dialable_leads), ""],
+      ["Contact rate", pct(k.contact_rate), "contacts / calls"],
+      ["Machine rate", pct(k.amd_rate), amdFlag],
+      ["Waiting calls", lv(live.calls_waiting), "in queue now"],
+      ["Dropped calls", n(k.dropped), ""],
+      ["Drop rate", pct(drop), dropFlag],
+    ]],
   ];
-  $("kpis").innerHTML = tiles.map(([l, v, note]) =>
-    `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("");
+  $("kpis").innerHTML = groups.map(([g, tiles]) =>
+    `<div class="kgroup"><div class="gname">${g}</div><div class="krow" style="--cols:${tiles.length}">` +
+    tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("") +
+    `</div></div>`).join("");
 }
 
 function renderCats(cats) {
@@ -248,7 +276,7 @@ function rateCell(v, warnHi, critHi) {
 function renderAll() {
   if (!DATA) return;
   const d = DATA;
-  renderKpis(d.kpis);
+  renderKpis(d.kpis, d.live);
   renderCats(d.categories);
 
   table($("statusTbl"), "status", [
@@ -363,7 +391,7 @@ $("campaign").onchange = load;
 $("refresh").onclick = async () => { $("stamp").textContent = "Refreshing…"; await fetch("/api/insights/refresh", { method: "POST" }); setTimeout(load, 4000); };
 
 load();
-setInterval(load, 60000);
+setInterval(load, 20000);
 </script>
 </body>
 </html>

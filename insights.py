@@ -289,6 +289,7 @@ class InsightsStore:
             "close_rate": rate(totals["sale"], totals["contacts"]),
             "avg_talk": rate(totals["talk"], totals["contacts"]),
             "sales_per_100": rate(totals["sale"] * 100, dials),
+            "dropped": int(totals["dropped"]),
         }
 
         cats = []
