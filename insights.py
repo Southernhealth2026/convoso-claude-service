@@ -97,6 +97,16 @@ def _parse_dt(s):
     return None
 
 
+ATTEMPT_BUCKETS = [(1, 1, "1st call"), (2, 3, "2–3"), (4, 6, "4–6"), (7, 10, "7–10"), (11, 10**9, "11+")]
+
+
+def attempt_bucket(n):
+    for lo, hi, label in ATTEMPT_BUCKETS:
+        if lo <= n <= hi:
+            return label
+    return "1st call" if n <= 0 else "11+"
+
+
 def _digits(v):
     d = "".join(ch for ch in str(v or "") if ch.isdigit())
     if len(d) == 11 and d.startswith("1"):
@@ -139,6 +149,7 @@ def normalize(row):
         "agent_id": user_id if agent_handled else "",
         "agent": user if agent_handled else "",
         "list_id": str(_first(row, "list_id") or ""),
+        "attempt": int(_num(_first(row, "called_count"))) if _first(row, "called_count") is not None else None,
         "cid": _digits(_first(row, "caller_id_displayed", "callerid", "caller_id", "outbound_cid",
                               "cid", "did", "dialed_from", "from_number", "ani")),
         "campaign": str(_first(row, "campaign", "campaign_name", "campaign_id") or ""),
@@ -255,6 +266,7 @@ class InsightsStore:
         agent_status = defaultdict(lambda: defaultdict(int))
         by_list = defaultdict(lambda: blank())
         by_cid = defaultdict(lambda: blank())
+        by_attempt = defaultdict(lambda: blank())
         by_hour = defaultdict(lambda: blank())
 
         for c in calls:
@@ -263,6 +275,8 @@ class InsightsStore:
                        by_hour[c["when"].hour if c["when"] else -1]]
             if c.get("cid") and not c["inbound"]:
                 buckets.append(by_cid[c["cid"]])
+            if c.get("attempt") is not None and not c["inbound"]:
+                buckets.append(by_attempt[attempt_bucket(c["attempt"])])
             for bucket in buckets:
                 bucket["dials"] += 1
                 bucket[cat] += 1
@@ -405,6 +419,21 @@ class InsightsStore:
             })
         dids.sort(key=lambda r: -r["dials"])
 
+        attempts = []
+        for _, _, label in ATTEMPT_BUCKETS:
+            b = by_attempt.get(label)
+            if not b:
+                continue
+            attempts.append({
+                "bucket": label,
+                "dials": int(b["dials"]),
+                "share": rate(b["dials"], out_dials) if out_dials else None,
+                "contacts": int(b["contacts"]),
+                "live_rate": rate(b["contacts"] + b["dropped"], b["dials"]),
+                "amd_rate": rate(b["amd"], b["dials"]),
+                "sales": int(b["sale"]),
+            })
+
         hours = []
         for h in sorted(k for k in by_hour if k >= 0):
             b = by_hour[h]
@@ -429,5 +458,7 @@ class InsightsStore:
             "lists": lists,
             "hours": hours,
             "dids": dids,
+            "did_count": len(dids),
+            "attempts": attempts,
             "did_avg_live_rate": avg_live,
         }

@@ -167,6 +167,10 @@
       <div class="hint">Outbound calls grouped by the number they went out on. A number marked "Spam Likely" gets far fewer live answers than the rest, so compare each number against the team average.</div>
     </div>
     <div class="hint" id="didNote" style="margin-bottom:10px"></div>
+    <h3 style="font:600 18px var(--serif);margin:6px 0 8px">By call attempt</h3>
+    <div class="hint" style="margin-bottom:10px">If even first-time leads hit machines 80%+ of the time, people are screening your numbers (spam labels). If first calls connect well and only the 7th+ attempts are bad, it's list fatigue, not the numbers.</div>
+    <div class="tbl-wrap" style="margin-bottom:18px"><table id="attTbl"></table></div>
+    <h3 style="font:600 18px var(--serif);margin:6px 0 8px">Each number</h3>
     <div class="tbl-wrap" style="max-height:520px"><table id="didTbl"></table></div>
   </section>
 
@@ -263,7 +267,8 @@ function table(el, key, cols, rows, defaultSort) {
   const sorted = [...rows].sort((a, b) => {
     const va = a[s.col], vb = b[s.col];
     if (va == null && vb == null) return 0; if (va == null) return 1; if (vb == null) return -1;
-    const r = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+    const ORD = ["1st call", "2–3", "4–6", "7–10", "11+"];
+    const r = (s.col === "bucket") ? ORD.indexOf(va) - ORD.indexOf(vb) : typeof va === "string" ? va.localeCompare(vb) : va - vb;
     return s.dir === "asc" ? r : -r;
   });
   const head = "<thead><tr>" + cols.map(c =>
@@ -351,6 +356,29 @@ function renderDids(d) {
   if (!dids.length) {
     note.textContent = "Convoso's call log isn't returning a caller ID for these calls yet.";
     $("didTbl").innerHTML = "";
+    return;
+  }
+  table($("attTbl"), "att", [
+    { key: "bucket", label: "Attempt #" },
+    { key: "dials", label: "Calls", num: true, fmt: n },
+    { key: "share", label: "Share", num: true, fmt: v => pct(v, 0) },
+    { key: "amd_rate", label: "Machine %", num: true, fmt: v => rateCell(v, 0.65, 0.80) },
+    { key: "live_rate", label: "Live answer %", num: true, fmt: v => pct(v) },
+    { key: "contacts", label: "Contacts", num: true, fmt: n },
+    { key: "sales", label: "Sales", num: true, fmt: n },
+  ], d.attempts || [], { col: "bucket", dir: "asc" });
+  const judged = dids.filter(x => x.health !== "low data").length;
+  if (judged < dids.length * 0.2) {
+    const per = d.kpis && dids.length ? (dids.reduce((a, x) => a + x.dials, 0) / dids.length) : 0;
+    note.innerHTML = `You used <b>${n(dids.length)} different caller IDs</b> today — about ${per.toFixed(1)} calls each. That's too few per number to judge any single one; the attempt table above is the better test. Sort by Live % to spot numbers that never connect as the day goes on.`;
+    table($("didTbl"), "did", [
+      { key: "cid", label: "Caller ID", fmt: fmtPhone },
+      { key: "dials", label: "Calls", num: true, fmt: n },
+      { key: "live", label: "Live answers", num: true, fmt: n },
+      { key: "live_rate", label: "Live %", num: true, fmt: v => pct(v) },
+      { key: "amd_rate", label: "Machine %", num: true, fmt: v => pct(v) },
+      { key: "sales", label: "Sales", num: true, fmt: n },
+    ], dids, { col: "dials", dir: "desc" });
     return;
   }
   const flagged = dids.filter(x => x.health === "flagged").length, weak = dids.filter(x => x.health === "weak").length;
