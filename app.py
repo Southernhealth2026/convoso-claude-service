@@ -1743,7 +1743,8 @@ def api_live_shape():
     responses, so the top-strip mapping can be checked."""
     out = {}
     for path, payload in (("/agent-monitor/search", {}),
-                          ("/campaigns/search", {"limit": 3, "offset": 0})):
+                          ("/campaigns/search", {"limit": 3, "offset": 0}),
+                          ("/log/retrieve", {"limit": 1, "offset": 0})):
         try:
             out[path] = describe_shape(convoso_post(path, payload))
         except Exception as e:

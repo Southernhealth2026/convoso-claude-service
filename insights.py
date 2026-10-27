@@ -38,6 +38,7 @@ REFRESH_SECONDS = int(os.environ.get("INSIGHTS_REFRESH_SECONDS", "120"))
 PAGE_SIZE = int(os.environ.get("INSIGHTS_PAGE_SIZE", "500"))
 MAX_PAGES = int(os.environ.get("INSIGHTS_MAX_PAGES", "60"))
 OVERLAP_MINUTES = 5
+DID_MIN_DIALS = int(os.environ.get("DID_MIN_DIALS", "40"))
 
 
 def _words(env_name, default):
@@ -96,6 +97,13 @@ def _parse_dt(s):
     return None
 
 
+def _digits(v):
+    d = "".join(ch for ch in str(v or "") if ch.isdigit())
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    return d
+
+
 def classify(status_name, agent_handled):
     s = (status_name or "").lower()
     if any(w in s for w in SALE_WORDS):
@@ -131,6 +139,8 @@ def normalize(row):
         "agent_id": user_id if agent_handled else "",
         "agent": user if agent_handled else "",
         "list_id": str(_first(row, "list_id") or ""),
+        "cid": _digits(_first(row, "caller_id_displayed", "callerid", "caller_id", "outbound_cid",
+                              "cid", "did", "dialed_from", "from_number", "ani")),
         "campaign": str(_first(row, "campaign", "campaign_name", "campaign_id") or ""),
         "inbound": "IN" in call_type and "OUT" not in call_type,
         "length": length,
@@ -244,12 +254,16 @@ class InsightsStore:
         agent_names = {}
         agent_status = defaultdict(lambda: defaultdict(int))
         by_list = defaultdict(lambda: blank())
+        by_cid = defaultdict(lambda: blank())
         by_hour = defaultdict(lambda: blank())
 
         for c in calls:
             cat = c["cat"]
-            for bucket in (totals, by_list[c["list_id"] or "—"],
-                           by_hour[c["when"].hour if c["when"] else -1]):
+            buckets = [totals, by_list[c["list_id"] or "—"],
+                       by_hour[c["when"].hour if c["when"] else -1]]
+            if c.get("cid") and not c["inbound"]:
+                buckets.append(by_cid[c["cid"]])
+            for bucket in buckets:
                 bucket["dials"] += 1
                 bucket[cat] += 1
                 if cat in ("contact", "sale"):
@@ -364,6 +378,33 @@ class InsightsStore:
             })
         lists.sort(key=lambda r: -r["dials"])
 
+        # Caller ID health: a number flagged as spam gets far fewer live
+        # answers than the team average on the same lists.
+        out_dials = sum(b["dials"] for b in by_cid.values())
+        out_live = sum(b["contacts"] + b["dropped"] for b in by_cid.values())
+        avg_live = rate(out_live, out_dials)
+        dids = []
+        for cid, b in by_cid.items():
+            live = b["contacts"] + b["dropped"]
+            lr = rate(live, b["dials"])
+            health = "low data"
+            if b["dials"] >= DID_MIN_DIALS and avg_live:
+                ratio = (lr or 0) / avg_live
+                health = "flagged" if ratio < 0.4 else "weak" if ratio < 0.7 else "ok"
+            dids.append({
+                "cid": cid,
+                "dials": int(b["dials"]),
+                "live": int(live),
+                "live_rate": lr,
+                "contacts": int(b["contacts"]),
+                "amd_rate": rate(b["amd"], b["dials"]),
+                "no_answer_rate": rate(b["no_answer"], b["dials"]),
+                "sales": int(b["sale"]),
+                "vs_avg": (lr / avg_live) if (lr is not None and avg_live) else None,
+                "health": health,
+            })
+        dids.sort(key=lambda r: -r["dials"])
+
         hours = []
         for h in sorted(k for k in by_hour if k >= 0):
             b = by_hour[h]
@@ -387,4 +428,6 @@ class InsightsStore:
             "agents": agents,
             "lists": lists,
             "hours": hours,
+            "dids": dids,
+            "did_avg_live_rate": avg_live,
         }

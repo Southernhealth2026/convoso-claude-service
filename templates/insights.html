@@ -163,6 +163,15 @@
 
   <section>
     <div class="sec-head">
+      <h2>Caller IDs</h2>
+      <div class="hint">Outbound calls grouped by the number they went out on. A number marked "Spam Likely" gets far fewer live answers than the rest, so compare each number against the team average.</div>
+    </div>
+    <div class="hint" id="didNote" style="margin-bottom:10px"></div>
+    <div class="tbl-wrap" style="max-height:520px"><table id="didTbl"></table></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
       <h2>By hour</h2>
       <div class="hint">Darker cell = better rate for that hour. Use it to time breaks and lunch away from your best contact hours.</div>
     </div>
@@ -326,6 +335,40 @@ function renderAll() {
   ], d.lists, { col: "dials", dir: "desc" });
 
   renderHours(d.hours);
+  renderDids(d);
+}
+
+const fmtPhone = (p) => p && p.length === 10 ? `(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}` : esc(p);
+const healthPill = (h) => {
+  const map = { flagged: ["crit", "Likely flagged"], weak: ["warn", "Weak"], ok: ["good", "OK"], "low data": ["", "Not enough calls"] };
+  const [c, label] = map[h] || ["", h];
+  return c ? `<span class="pill" style="color:var(--${c});background:var(--${c}-bg)">${label}</span>` : `<span class="muted">${label}</span>`;
+};
+
+function renderDids(d) {
+  const dids = d.dids || [];
+  const note = $("didNote");
+  if (!dids.length) {
+    note.textContent = "Convoso's call log isn't returning a caller ID for these calls yet.";
+    $("didTbl").innerHTML = "";
+    return;
+  }
+  const flagged = dids.filter(x => x.health === "flagged").length, weak = dids.filter(x => x.health === "weak").length;
+  note.innerHTML = `${dids.length} numbers used today · team average live-answer rate <b>${pct(d.did_avg_live_rate)}</b> · ` +
+    `<b style="color:var(--crit)">${flagged} likely flagged</b> · <b style="color:var(--warn)">${weak} weak</b> · under 40 calls = not enough data yet.`;
+  const maxV = Math.max(1.5, ...dids.map(x => x.vs_avg || 0));
+  table($("didTbl"), "did", [
+    { key: "cid", label: "Caller ID", fmt: fmtPhone },
+    { key: "health", label: "Health", fmt: healthPill },
+    { key: "dials", label: "Calls", num: true, fmt: n },
+    { key: "live", label: "Live answers", num: true, fmt: n },
+    { key: "live_rate", label: "Live %", num: true, fmt: v => pct(v) },
+    { key: "vs_avg", label: "vs team avg", num: true, fmt: (v, r) => v == null ? "—" :
+        `<div class="inbar" data-tip="${fmtPhone(r.cid)}: ${pct(r.live_rate)} live vs ${pct(d.did_avg_live_rate)} team avg"><b style="width:${Math.min(v, maxV) / maxV * 70}px;background:${r.health === "flagged" ? "var(--crit)" : r.health === "weak" ? "var(--warn)" : "rgb(var(--seq))"}"></b>${(v * 100).toFixed(0)}%</div>` },
+    { key: "amd_rate", label: "Machine %", num: true, fmt: v => pct(v) },
+    { key: "no_answer_rate", label: "No answer %", num: true, fmt: v => pct(v) },
+    { key: "sales", label: "Sales", num: true, fmt: n },
+  ], dids, { col: "vs_avg", dir: "asc" });
 }
 
 function renderHours(hours) {
