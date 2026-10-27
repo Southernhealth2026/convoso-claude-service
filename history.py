@@ -217,27 +217,50 @@ class HistoryStore:
         self.job = None
         self.wanted = 0
         self.current_day = None
+        self.progress = None
+
+    def _fetch_page(self, start, end, offset):
+        last = None
+        for attempt in range(3):
+            try:
+                return self.convoso_post("/log/retrieve", {
+                    "start_time": start.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_time": end.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                    "limit": PAGE_SIZE,
+                    "offset": offset,
+                }, timeout=30)
+            except Exception as e:   # slow or dropped request: retry
+                last = e
+                log.warning("History: page offset=%s attempt %s failed: %s", offset, attempt + 1, e)
+        raise RuntimeError(f"page at offset {offset} failed 3 times: {last}")
 
     def _fetch_day(self, day):
         start = datetime(day.year, day.month, day.day, tzinfo=TZ)
         end = start + timedelta(days=1) - timedelta(seconds=1)
         by_camp = defaultdict(new_agg)
         offset = 0
-        for _ in range(MAX_PAGES_PER_DAY):
-            body = self.convoso_post("/log/retrieve", {
-                "start_time": start.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-                "end_time": end.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-                "limit": PAGE_SIZE,
-                "offset": offset,
-            }, timeout=60)
+        seen_first = set()
+        rows = 0
+        for page_no in range(1, MAX_PAGES_PER_DAY + 1):
+            with self.lock:
+                self.progress = {"day": day.isoformat(), "page": page_no, "rows": rows}
+            body = self._fetch_page(start, end, offset)
             data = body.get("data") or {}
             page = data if isinstance(data, list) else (data.get("results") or data.get("entries") or [])
             if not isinstance(page, list):
                 page = []
+            # Guard against an API that repeats the last page forever
+            first_id = str(page[0].get("id")) if page and isinstance(page[0], dict) else None
+            if first_id and first_id in seen_first:
+                log.warning("History: %s repeated page at offset %s, stopping", day, offset)
+                break
+            if first_id:
+                seen_first.add(first_id)
             for raw in page:
                 if isinstance(raw, dict):
                     rec = normalize(raw)
                     add_record(by_camp[rec["campaign"] or ""], rec)
+                    rows += 1
             if len(page) < PAGE_SIZE:
                 break
             offset += PAGE_SIZE
@@ -309,6 +332,7 @@ class HistoryStore:
                     merge_into(total, agg)
             running = self.job is not None
             current = self.current_day.isoformat() if self.current_day else None
+            progress = dict(self.progress) if self.progress else None
             failed = len([d for d in self.failed if (today - d).days < days])
 
         out = build_views(total, list_names)
@@ -317,6 +341,7 @@ class HistoryStore:
             "loaded_days": loaded,
             "loading": running and loaded < days,
             "loading_day": current,
+            "progress": progress,
             "failed_days": failed,
             "from": (today - timedelta(days=days - 1)).isoformat(),
             "to": today.isoformat(),

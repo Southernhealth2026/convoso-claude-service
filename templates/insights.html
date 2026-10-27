@@ -553,7 +553,7 @@ async function loadAttempts() {
     const st = $("attStatus");
     if (r.days > 1) {
       st.innerHTML = r.loading
-        ? `<b>Loading history… ${r.loaded_days} of ${r.days} days</b> (pulling ${r.loading_day || ""}). Numbers fill in as each day loads.`
+        ? `<b>Loading history… ${r.loaded_days} of ${r.days} days</b> (pulling ${r.loading_day || ""}${r.progress ? `, page ${r.progress.page}, ${n(r.progress.rows)} calls so far` : ""}). Numbers fill in as each day loads.`
         : `Showing ${r.from} to ${r.to} · ${n(a.attempt_summary.total_dials)} outbound calls${r.failed_days ? ` · ${r.failed_days} day(s) couldn't load` : ""}.`;
       if (r.loading) setTimeout(loadAttempts, 8000);
     } else st.textContent = "";
