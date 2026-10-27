@@ -194,9 +194,14 @@ document.addEventListener("mousemove", (e) => {
 
 function flag(level, text) { return `<span class="flag ${level}">${text}</span>`; }
 
+// Prefer Convoso's own drop numbers (match its Agent Monitor); fall back to ours.
+function effectiveDrop(k, live) {
+  return (live && live.cv_drop_pct != null) ? live.cv_drop_pct / 100 : k.drop_rate;
+}
+
 function renderKpis(k, live) {
   live = live || {};
-  const drop = k.drop_rate;
+  const drop = effectiveDrop(k, live);
   const dropFlag = drop == null ? "" : drop > 0.03 ? flag("crit", "Over 3% limit") : drop > 0.02 ? flag("warn", "Near limit") : flag("good", "OK");
   const amdFlag = k.amd_rate == null ? "" : k.amd_rate >= 0.80 ? flag("crit", "Very high") : k.amd_rate >= 0.65 ? flag("warn", "High") : "";
   const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
@@ -213,16 +218,16 @@ function renderKpis(k, live) {
       ["Contacts", n(k.contacts), "real conversations"],
       ["Sales", n(k.sales), `${k.sales_per_100 == null ? "—" : k.sales_per_100.toFixed(2)} per 100 dials`],
       ["Conversion", pct(k.close_rate), "sales / contacts"],
-      ["Avg wait", dur(k.avg_wait), "agent idle between calls"],
+      ["Avg wait", dur(live.cv_wait_avg != null ? live.cv_wait_avg : k.avg_wait), "agent idle between calls"],
       ["Avg handle", dur(k.avg_talk), "talk per contact"],
     ]],
     ["Dialing", [
-      ["Dial level", live.dial_level == null ? "—" : Number(live.dial_level).toFixed(1), ""],
-      ["Dialable leads", lv(live.dialable_leads), ""],
+      ["Dial level", live.dial_level == null ? "—" : Number(live.dial_level).toFixed(1), live.dial_level_campaign ? esc(live.dial_level_campaign) : ""],
+      ["Dialable leads", lv(live.dialable_leads), live.hopper != null ? `${n(live.hopper)} in hopper` : ""],
       ["Contact rate", pct(k.contact_rate), "contacts / calls"],
       ["Machine rate", pct(k.amd_rate), amdFlag],
       ["Waiting calls", lv(live.calls_waiting), "in queue now"],
-      ["Dropped calls", n(k.dropped), ""],
+      ["Dropped calls", n(live.cv_dropped != null ? live.cv_dropped : k.dropped), live.cv_answered != null ? `of ${n(live.cv_answered)} answered` : ""],
       ["Drop rate", pct(drop), dropFlag],
     ]],
   ];
@@ -372,9 +377,9 @@ async function load() {
     if (d.meta.last_error) {
       banner.className = "banner crit"; banner.style.display = "block";
       banner.textContent = "Last pull from Convoso failed, showing the previous data: " + d.meta.last_error;
-    } else if (d.kpis.drop_rate != null && d.kpis.drop_rate > 0.03 && d.kpis.dials >= 100) {
+    } else if (effectiveDrop(d.kpis, d.live) != null && effectiveDrop(d.kpis, d.live) > 0.03 && d.kpis.dials >= 100) {
       banner.className = "banner crit"; banner.style.display = "block";
-      banner.innerHTML = `<b>Drop rate is ${pct(d.kpis.drop_rate)}.</b> Customers are answering with no agent free. Lower the dial level or add agents — the FCC limit for predictive dialing is 3% over 30 days.`;
+      banner.innerHTML = `<b>Drop rate is ${pct(effectiveDrop(d.kpis, d.live))}.</b> Customers are answering with no agent free. Lower the dial level or add agents — the FCC limit for predictive dialing is 3% over 30 days.`;
     } else banner.style.display = "none";
     renderAll();
   } catch (e) {

@@ -21,6 +21,7 @@ log = logging.getLogger("convoso-claude.live")
 CACHE_SECONDS = 15
 _cache = {"at": 0, "key": None, "data": None}
 _lock = threading.Lock()
+_campaign_map = {}   # campaign name -> id, learned from agent-monitor
 
 
 def _num(v):
@@ -28,6 +29,44 @@ def _num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _val(v):
+    """Number from 12, "12", "56.51%", or "hh:mm:ss"/"mm:ss" (-> seconds)."""
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    t = str(v).strip().rstrip("%")
+    if ":" in t:
+        try:
+            parts = [int(float(p)) for p in t.split(":")]
+        except ValueError:
+            return None
+        sec = 0
+        for p in parts:
+            sec = sec * 60 + p
+        return float(sec)
+    return _num(t)
+
+
+def _summary(mon):
+    """Convoso's own Agent Monitor totals live at data.entries.data."""
+    if isinstance(mon, dict):
+        e = mon.get("entries")
+        if isinstance(e, dict) and isinstance(e.get("data"), dict):
+            return e["data"]
+    return {}
+
+
+def _campaign_ids(mon):
+    """name -> id from data.entries.campaigns ([{name, value}])."""
+    out = {}
+    if isinstance(mon, dict):
+        e = mon.get("entries")
+        if isinstance(e, dict):
+            for c in e.get("campaigns") or []:
+                if isinstance(c, dict) and c.get("name") is not None:
+                    out[str(c.get("name"))] = c.get("value")
+    return out
 
 
 def _walk(obj, depth=0):
@@ -135,7 +174,10 @@ def fetch_live(convoso_post, campaign=None):
     # --- agents --------------------------------------------------------
     mon = None
     try:
-        body = convoso_post("/agent-monitor/search", {})
+        payload = {}
+        if campaign and _campaign_map.get(campaign) is not None:
+            payload["campaign_id"] = _campaign_map[campaign]
+        body = convoso_post("/agent-monitor/search", payload)
         if body.get("success") is False:
             out["errors"].append(f"agent-monitor: {body.get('text') or body.get('code')}")
         mon = body.get("data") if isinstance(body, dict) else None
@@ -161,8 +203,50 @@ def fetch_live(convoso_post, campaign=None):
             out["in_call"] = _find_number(mon, ["agents_in_call", "in_call_agents", "incall_agents"])
             out["paused"] = _find_number(mon, ["paused_agents", "agents_paused"])
         out["calls_waiting"] = _find_number(mon, ["calls_waiting", "waiting_calls", "live_calls_waiting", "calls_in_queue", "queue_calls"])
+
+        summ = _summary(mon)
+        if summ:
+            g = lambda k: _val(summ.get(k))
+            if g("agent_total") is not None:
+                out["logged_in"] = g("agent_total")
+                out["in_call"] = g("agent_incall")
+                out["waiting"] = g("agent_ready")
+                out["paused"] = g("agent_paused")
+            cw_in, cw_out = g("calls_waiting_in"), g("calls_waiting_out")
+            if cw_in is not None or cw_out is not None:
+                out["calls_waiting"] = (cw_in or 0) + (cw_out or 0)
+            out["dialable_leads"] = g("dialable_leads")
+            out["hopper"] = g("hopper")
+            out["cv_dropped"] = g("dropped")
+            out["cv_drop_pct"] = g("dropped_percent")
+            out["cv_answered"] = g("answered")
+            out["cv_calls_today"] = g("calls_today")
+            out["cv_wait_avg"] = g("outbound_total_wait_avg")
+            out["cv_talk_avg"] = g("outbound_total_talk_avg")
+            dl = g("dial_level")
+            if dl is not None:
+                out["dial_level"] = dl
         out["dial_level"] = _find_number(mon, ["dial_level", "auto_dial_level", "dial_ratio"])
         out["dialable_leads"] = _find_number(mon, ["dialable_leads", "dialable", "dialable_count"])
+
+    if mon is not None:
+        _campaign_map.update(_campaign_ids(mon))
+
+    # Convoso only reports dial level for a single campaign. With "All
+    # campaigns" selected, ask each campaign and show the busiest one.
+    if out["dial_level"] is None and not campaign and _campaign_map:
+        best = None
+        for name, cid in list(_campaign_map.items())[:6]:
+            try:
+                b = convoso_post("/agent-monitor/search", {"campaign_id": cid})
+                sm = _summary(b.get("data"))
+                dl, ag = _val(sm.get("dial_level")), _val(sm.get("agent_total")) or 0
+                if dl is not None and (best is None or ag > best[2]):
+                    best = (name, dl, ag)
+            except Exception as e:
+                out["errors"].append(f"dial level {name}: {e}")
+        if best:
+            out["dial_level"], out["dial_level_campaign"] = best[1], best[0]
 
     # --- campaign settings (dial level / dialable leads fallback) ------
     if out["dial_level"] is None or out["dialable_leads"] is None:
@@ -206,13 +290,15 @@ def describe_shape(obj, depth=0, max_depth=4):
     if isinstance(obj, dict):
         out = {}
         for i, (k, v) in enumerate(obj.items()):
-            if i >= 40:
-                out["…"] = f"{len(obj) - 40} more keys"
+            if i >= 80:
+                out["…"] = f"{len(obj) - 80} more keys"
                 break
             kl = str(k).lower()
             if kl in ("status", "agent_status", "state", "status_name", "agent_state", "call_type") and not isinstance(v, (dict, list)):
                 out[k] = f"str = {v!r}"
-            elif kl in ("dial_level", "auto_dial_level", "dialable_leads", "calls_waiting", "available_agents", "logged_in", "total_agents"):
+            elif kl in ("dial_level", "auto_dial_level", "dialable_leads", "calls_waiting", "available_agents", "logged_in", "total_agents",
+                        "dropped", "dropped_percent", "answered", "calls_today", "hopper", "outbound_total_wait_avg",
+                        "outbound_total_talk_avg", "calls_waiting_in", "calls_waiting_out"):
                 out[k] = f"{type(v).__name__} = {v!r}"
             else:
                 out[k] = describe_shape(v, depth + 1, max_depth)
