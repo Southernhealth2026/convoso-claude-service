@@ -48,6 +48,9 @@ def _words(env_name, default):
 
 SALE_WORDS = _words("SALE_STATUSES", "sale,sold,enrolled,submitted,closed")
 CONTACT_EXCLUDE_WORDS = _words("CONTACT_EXCLUDE_STATUSES", "")
+# Campaigns whose "Sale" dispositions are service work on existing clients,
+# not new deals (e.g. Southern Custo). They still count as conversations.
+SALE_EXCLUDE_CAMPAIGNS = _words("SALE_EXCLUDE_CAMPAIGNS", "custo")
 # A disposition that mentions a sale but means "no sale" (e.g. "Pitched - No Sale")
 NOT_SALE_WORDS = _words("NOT_SALE_STATUSES", "no sale,not sold,unsold,no-sale,nosale,not closed,not enrolled,not submitted")
 
@@ -143,11 +146,15 @@ def normalize(row):
     call_type = str(_first(row, "call_type", "type", "direction") or "").upper()
     when = _parse_dt(_first(row, "call_date", "start_time", "date"))
     length = _num(_first(row, "call_length", "length_in_sec", "talk_time", "duration"))
+    cat = classify(status_name, agent_handled)
+    campaign = str(_first(row, "campaign", "campaign_name", "campaign_id") or "")
+    if cat == "sale" and any(w in campaign.lower() for w in SALE_EXCLUDE_CAMPAIGNS):
+        cat = "contact"
     return {
         "id": str(call_id) if call_id is not None else None,
         "when": when,
         "status": str(status_name),
-        "cat": classify(status_name, agent_handled),
+        "cat": cat,
         "agent_id": user_id if agent_handled else "",
         "agent": user if agent_handled else "",
         "list_id": str(_first(row, "list_id") or ""),
