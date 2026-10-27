@@ -12,7 +12,8 @@ Refresh model:
     small overlap), de-duplicated by call id.
 
 Env vars (all optional):
-  CONVOSO_TZ               Convoso account time zone (default America/New_York)
+  CONVOSO_TZ               Time zone Convoso reports call times in (default America/Los_Angeles)
+  DISPLAY_TZ               Time zone the page shows hours/days in (default America/New_York)
   INSIGHTS_REFRESH_SECONDS How often to pull new calls (default 120)
   INSIGHTS_PAGE_SIZE       Rows per /log/retrieve page (default 500)
   SALE_STATUSES            Comma list of words that mark a sale disposition
@@ -31,7 +32,8 @@ from zoneinfo import ZoneInfo
 
 log = logging.getLogger("convoso-claude.insights")
 
-TZ = ZoneInfo(os.environ.get("CONVOSO_TZ", "America/New_York"))
+SRC_TZ = ZoneInfo(os.environ.get("CONVOSO_TZ", "America/Los_Angeles"))
+TZ = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/New_York"))
 REFRESH_SECONDS = int(os.environ.get("INSIGHTS_REFRESH_SECONDS", "120"))
 PAGE_SIZE = int(os.environ.get("INSIGHTS_PAGE_SIZE", "500"))
 MAX_PAGES = int(os.environ.get("INSIGHTS_MAX_PAGES", "60"))
@@ -88,7 +90,7 @@ def _parse_dt(s):
     s = str(s).strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
-            return datetime.strptime(s[:19], fmt).replace(tzinfo=TZ)
+            return datetime.strptime(s[:19], fmt).replace(tzinfo=SRC_TZ).astimezone(TZ)
         except ValueError:
             continue
     return None
@@ -115,7 +117,9 @@ def normalize(row):
     status_name = _first(row, "status_name", "status_desc", "status") or "Unknown"
     user_id = str(_first(row, "user_id", "agent_id") or "").strip()
     user = str(_first(row, "user", "agent_name", "user_name", "agent_full_name") or "").strip()
-    agent_handled = bool(user_id) and user_id not in ("0", "-1") and user.lower() not in ("", "system", "vdad", "auto")
+    agent_handled = (bool(user_id) and user_id not in ("0", "-1")
+                     and user.lower() not in ("", "vdad", "auto")
+                     and not user.lower().startswith("system"))
     call_type = str(_first(row, "call_type", "type", "direction") or "").upper()
     when = _parse_dt(_first(row, "call_date", "start_time", "date"))
     length = _num(_first(row, "call_length", "length_in_sec", "talk_time", "duration"))
@@ -152,8 +156,8 @@ class InsightsStore:
         offset = 0
         for _ in range(MAX_PAGES):
             body = self.convoso_post("/log/retrieve", {
-                "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "end_time": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "start_time": start_dt.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end_dt.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S"),
                 "limit": PAGE_SIZE,
                 "offset": offset,
             }, timeout=45)
@@ -338,7 +342,9 @@ class InsightsStore:
                 "sales_per_hour": (a["sale"] / hours) if hours else None,
                 "top_dispos": [{"status": k, "count": v} for k, v in top],
             })
-        agents = [a for a in agents if a["handled"] or (a["logged_sec"] or 0) > 0]
+        agents = [a for a in agents
+                  if (a["handled"] or (a["logged_sec"] or 0) > 0)
+                  and not str(a["name"]).lower().startswith("system")]
         agents.sort(key=lambda a: (-(a["sales"]), -(a["contacts"])))
 
         lists = []
