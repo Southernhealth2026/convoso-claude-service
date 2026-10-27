@@ -142,8 +142,14 @@
   <section id="attSec">
     <div class="sec-head">
       <h2>Lead attempts</h2>
-      <div class="hint">How many times each lead had been called when we dialed it today. Fresh leads answer; leads called over and over mostly go to voicemail.</div>
+      <div class="seg" role="group" aria-label="Date range" id="attRange">
+        <button data-days="1" aria-pressed="true">Today</button>
+        <button data-days="7" aria-pressed="false">7 days</button>
+        <button data-days="30" aria-pressed="false">30 days</button>
+        <button data-days="90" aria-pressed="false">90 days</button>
+      </div>
     </div>
+    <div class="hint" style="margin-bottom:12px">How many times each lead had been called at the moment we dialed it. Fresh leads answer; leads called over and over mostly go to voicemail. <span id="attStatus"></span></div>
     <div class="krow kgroup" id="attKpis" style="--cols:4;margin-bottom:22px"></div>
 
     <h3 class="h3">Live answers by attempt #</h3>
@@ -367,7 +373,7 @@ function renderAll() {
   ], d.lists, { col: "dials", dir: "desc" });
 
   renderHours(d.hours);
-  renderAttempts(d);
+  if (ATT) renderAttempts(ATT);
   renderDids(d);
 }
 
@@ -384,7 +390,7 @@ function renderAttempts(d) {
     ["Avg attempt #", sm.avg_attempt == null ? "—" : sm.avg_attempt.toFixed(1), "times a lead had been called, on average"],
     ["Dials on 11+ leads", pct(sm.share_11, 0), `${n(sm.dials_11)} calls · ${n(sm.sales_11)} sales`],
     ["Sales from 1st–3rd call", pct(sm.sales_early_share, 0), `of ${n(sm.sales_total)} sales today`],
-    ["Suggested cutoff", cut ? `Stop after ${cut}` : "—", cut ? `would free ${pct(sm.share_past_cutoff, 0)} of dials (${n(sm.dials_past_cutoff)})` : "not enough data yet"],
+    ["Suggested cutoff", cut ? `Stop after ${cut}` : "—", cut ? `frees ${pct(sm.share_past_cutoff, 0)} of dials (${n(sm.dials_past_cutoff)})` + (sm.sales_past_cutoff != null ? ` · ${n(sm.sales_past_cutoff)} sale${sm.sales_past_cutoff === 1 ? "" : "s"} came after it` : "") : "not enough data yet"],
   ];
   $("attKpis").innerHTML = tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("");
 
@@ -519,6 +525,31 @@ function renderHours(hours) {
   el.innerHTML = head + "<tbody>" + body + "</tbody>";
 }
 
+let ATT = null, attDays = 1;
+async function loadAttempts() {
+  const qs = new URLSearchParams({ days: attDays });
+  const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
+  try {
+    const a = await fetch("/api/attempts?" + qs, { cache: "no-store" }).then(r => r.json());
+    ATT = a;
+    renderAttempts(a);
+    const r = a.range || {};
+    const st = $("attStatus");
+    if (r.days > 1) {
+      st.innerHTML = r.loading
+        ? `<b>Loading history… ${r.loaded_days} of ${r.days} days</b> (pulling ${r.loading_day || ""}). Numbers fill in as each day loads.`
+        : `Showing ${r.from} to ${r.to} · ${n(a.attempt_summary.total_dials)} outbound calls${r.failed_days ? ` · ${r.failed_days} day(s) couldn't load` : ""}.`;
+      if (r.loading) setTimeout(loadAttempts, 8000);
+    } else st.textContent = "";
+  } catch (e) { /* keep last view */ }
+}
+
+document.querySelectorAll("#attRange button").forEach(b => b.onclick = () => {
+  attDays = +b.dataset.days;
+  document.querySelectorAll("#attRange button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  loadAttempts();
+});
+
 async function load() {
   const qs = new URLSearchParams({ direction });
   const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
@@ -547,14 +578,15 @@ async function load() {
       banner.innerHTML = `<b>Drop rate is ${pct(effectiveDrop(d.kpis, d.live))}.</b> Customers are answering with no agent free. Lower the dial level or add agents — the FCC limit for predictive dialing is 3% over 30 days.`;
     } else banner.style.display = "none";
     renderAll();
+    loadAttempts();
   } catch (e) {
     $("stamp").textContent = "Couldn't reach the server — retrying";
   }
 }
 
-document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+document.querySelectorAll(".filters .seg button").forEach(b => b.onclick = () => {
   direction = b.dataset.dir;
-  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  document.querySelectorAll(".filters .seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
   load();
 });
 $("campaign").onchange = load;

@@ -43,6 +43,7 @@ from flask import Flask, abort, jsonify, render_template, request
 
 from insights import InsightsStore
 from live import describe_shape, fetch_live
+from history import HistoryStore
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1584,6 +1585,9 @@ def run_all_monitors():
 insights = InsightsStore(convoso_post)
 
 
+history = HistoryStore(convoso_post, insights)
+
+
 def refresh_insights():
     names = {}
     try:
@@ -1750,6 +1754,15 @@ def api_live_shape():
         except Exception as e:
             out[path] = {"error": str(e)}
     return jsonify(out)
+
+
+@app.route("/api/attempts", methods=["GET"])
+def api_attempts():
+    try:
+        days = int(request.args.get("days", "1"))
+    except ValueError:
+        days = 1
+    return jsonify(history.view(days, campaign=request.args.get("campaign") or None))
 
 
 @app.route("/api/insights/refresh", methods=["POST"])
