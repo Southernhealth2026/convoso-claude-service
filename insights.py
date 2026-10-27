@@ -48,6 +48,8 @@ def _words(env_name, default):
 
 SALE_WORDS = _words("SALE_STATUSES", "sale,sold,enrolled,submitted,closed")
 CONTACT_EXCLUDE_WORDS = _words("CONTACT_EXCLUDE_STATUSES", "")
+# A disposition that mentions a sale but means "no sale" (e.g. "Pitched - No Sale")
+NOT_SALE_WORDS = _words("NOT_SALE_STATUSES", "no sale,not sold,unsold,no-sale,nosale,not closed,not enrolled,not submitted")
 
 # Order matters: first match wins.
 CATEGORY_RULES = [
@@ -116,7 +118,7 @@ def _digits(v):
 
 def classify(status_name, agent_handled):
     s = (status_name or "").lower()
-    if any(w in s for w in SALE_WORDS):
+    if any(w in s for w in SALE_WORDS) and not any(w in s for w in NOT_SALE_WORDS):
         return "sale"
     for cat, words in CATEGORY_RULES:
         if any(w in s for w in words):
