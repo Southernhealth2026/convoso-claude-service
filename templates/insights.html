@@ -98,6 +98,17 @@
 
   .inbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   .inbar b { display: block; height: 8px; background: rgb(var(--seq)); border-radius: 0 3px 3px 0; min-width: 1px; }
+  .h3 { font: 600 19px var(--serif); margin: 18px 0 6px; }
+  .curve { display: flex; align-items: flex-end; gap: 4px; height: 210px; padding: 26px 12px 0; border: 1px solid var(--hairline); background: var(--bone); position: relative; }
+  .curve .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; position: relative; min-width: 0; }
+  .curve .bar { width: 72%; max-width: 34px; background: rgb(var(--seq)); border-radius: 4px 4px 0 0; min-height: 2px; }
+  .curve .col.past .bar { background: rgba(var(--seq), .35); }
+  .curve .sale { font: 600 10px var(--mono); color: var(--good); margin-bottom: 3px; white-space: nowrap; }
+  .curve .val { font: 10px var(--mono); color: var(--ink-soft); margin-bottom: 3px; }
+  .curve-x { display: flex; gap: 4px; padding: 6px 12px 0; }
+  .curve-x span { flex: 1; text-align: center; font: 10.5px var(--mono); color: var(--ink-faint); min-width: 0; }
+  .curve .cut { position: absolute; top: 6px; bottom: 0; border-left: 2px dashed var(--crit); }
+  .curve .cut b { position: absolute; top: -2px; left: 6px; font: 600 10px var(--mono); color: var(--crit); white-space: nowrap; letter-spacing: .04em; text-transform: uppercase; }
   .heat { text-align: center; font-family: var(--mono); font-size: 12px; }
 
   .tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bone); font-size: 12px; padding: 7px 10px; border-radius: 3px; z-index: 50; display: none; max-width: 260px; line-height: 1.4; }
@@ -127,6 +138,25 @@
   <div class="banner" id="banner"></div>
 
   <div class="kpis" id="kpis"></div>
+
+  <section id="attSec">
+    <div class="sec-head">
+      <h2>Lead attempts</h2>
+      <div class="hint">How many times each lead had been called when we dialed it today. Fresh leads answer; leads called over and over mostly go to voicemail.</div>
+    </div>
+    <div class="krow kgroup" id="attKpis" style="--cols:4;margin-bottom:22px"></div>
+
+    <h3 class="h3">Live answers by attempt #</h3>
+    <div class="hint" style="margin-bottom:10px">Each bar is the % of calls a real person answered on that attempt. Hover a bar for calls, machine rate and sales.</div>
+    <div id="attCurve" class="curve"></div>
+
+    <h3 class="h3">Grouped</h3>
+    <div class="tbl-wrap" style="margin-bottom:22px"><table id="attTbl"></table></div>
+
+    <h3 class="h3">By list</h3>
+    <div class="hint" style="margin-bottom:10px">Where each list's dials are going. Darker cells = more of that list's dials are in that attempt range. Hover a cell for its live %, machine % and sales.</div>
+    <div class="tbl-wrap"><table id="listAttTbl"></table></div>
+  </section>
 
   <section>
     <div class="sec-head">
@@ -167,10 +197,7 @@
       <div class="hint">Outbound calls grouped by the number they went out on. A number marked "Spam Likely" gets far fewer live answers than the rest, so compare each number against the team average.</div>
     </div>
     <div class="hint" id="didNote" style="margin-bottom:10px"></div>
-    <h3 style="font:600 18px var(--serif);margin:6px 0 8px">By call attempt</h3>
-    <div class="hint" style="margin-bottom:10px">If even first-time leads hit machines 80%+ of the time, people are screening your numbers (spam labels). If first calls connect well and only the 7th+ attempts are bad, it's list fatigue, not the numbers.</div>
-    <div class="tbl-wrap" style="margin-bottom:18px"><table id="attTbl"></table></div>
-    <h3 style="font:600 18px var(--serif);margin:6px 0 8px">Each number</h3>
+
     <div class="tbl-wrap" style="max-height:520px"><table id="didTbl"></table></div>
   </section>
 
@@ -340,7 +367,83 @@ function renderAll() {
   ], d.lists, { col: "dials", dir: "desc" });
 
   renderHours(d.hours);
+  renderAttempts(d);
   renderDids(d);
+}
+
+const BUCKETS = ["1st call", "2–3", "4–6", "7–10", "11+"];
+
+function renderAttempts(d) {
+  const sec = $("attSec");
+  const curve = d.attempt_curve || [], sm = d.attempt_summary || {};
+  if (!curve.length) { sec.style.display = "none"; return; }
+  sec.style.display = "";
+
+  const cut = sm.suggested_cutoff;
+  const tiles = [
+    ["Avg attempt #", sm.avg_attempt == null ? "—" : sm.avg_attempt.toFixed(1), "times a lead had been called, on average"],
+    ["Dials on 11+ leads", pct(sm.share_11, 0), `${n(sm.dials_11)} calls · ${n(sm.sales_11)} sales`],
+    ["Sales from 1st–3rd call", pct(sm.sales_early_share, 0), `of ${n(sm.sales_total)} sales today`],
+    ["Suggested cutoff", cut ? `Stop after ${cut}` : "—", cut ? `would free ${pct(sm.share_past_cutoff, 0)} of dials (${n(sm.dials_past_cutoff)})` : "not enough data yet"],
+  ];
+  $("attKpis").innerHTML = tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("");
+
+  // curve
+  const max = Math.max(0.0001, ...curve.map(x => x.live_rate || 0));
+  const cols = curve.map(x => {
+    const h = ((x.live_rate || 0) / max) * 100;
+    const past = cut && x.attempt > cut;
+    const tip = `<b>Attempt ${x.label}</b><br>${n(x.dials)} calls · ${n(x.contacts)} conversations · ${n(x.sales)} sales<br>Live answer ${pct(x.live_rate)} · Machine ${pct(x.amd_rate)}`;
+    return `<div class="col ${past ? "past" : ""}" data-tip="${tip}">
+      ${x.sales ? `<div class="sale">${x.sales} sale${x.sales > 1 ? "s" : ""}</div>` : ""}
+      <div class="val">${pct(x.live_rate, 1)}</div>
+      <div class="bar" style="height:calc(${h}% - 34px)"></div></div>`;
+  }).join("");
+  let cutLine = "";
+  if (cut) {
+    const idx = curve.findIndex(x => x.attempt > cut);
+    if (idx > 0) cutLine = `<div class="cut" style="left:calc(12px + (100% - 24px) * ${idx} / ${curve.length})"><b>cutoff</b></div>`;
+  }
+  $("attCurve").innerHTML = cols + cutLine;
+  let xs = $("attCurve").nextElementSibling;
+  if (!xs || !xs.classList.contains("curve-x")) {
+    xs = document.createElement("div"); xs.className = "curve-x";
+    $("attCurve").after(xs);
+  }
+  xs.innerHTML = curve.map(x => `<span>${x.label}</span>`).join("");
+
+  // grouped table
+  table($("attTbl"), "att", [
+    { key: "bucket", label: "Attempt #" },
+    { key: "dials", label: "Calls", num: true, fmt: n },
+    { key: "share", label: "Share", num: true, fmt: v => pct(v, 0) },
+    { key: "amd_rate", label: "Machine %", num: true, fmt: v => rateCell(v, 0.65, 0.80) },
+    { key: "live_rate", label: "Live answer %", num: true, fmt: v => pct(v) },
+    { key: "contacts", label: "Contacts", num: true, fmt: n },
+    { key: "sales", label: "Sales", num: true, fmt: n },
+  ], d.attempts || [], { col: "bucket", dir: "asc" });
+
+  // per list
+  const rows = (d.list_attempts || []).map(r => {
+    const o = { ...r };
+    BUCKETS.forEach(b => { o["b_" + b] = r.buckets[b] ? r.buckets[b].share : 0; });
+    return o;
+  });
+  const cell = (b) => (v, r) => {
+    const x = r.buckets[b];
+    if (!x) return `<span class="muted">—</span>`;
+    const a = Math.max(0.05, x.share) * 0.6;
+    const fg = a > 0.4 ? "#FAF7F0" : "var(--ink)";
+    const tip = `<b>${esc(r.name)} · attempt ${b}</b><br>${n(x.dials)} calls (${pct(x.share, 0)} of list)<br>Live ${pct(x.live_rate)} · Machine ${pct(x.amd_rate)} · ${n(x.sales)} sales`;
+    return `<div data-tip="${tip}" style="background:rgba(var(--seq),${a});color:${fg};padding:3px 6px;border-radius:2px;text-align:right">${pct(x.share, 0)}${x.sales ? ` <b style="color:${a > 0.4 ? "#CFE8CF" : "var(--good)"}">●${x.sales}</b>` : ""}</div>`;
+  };
+  table($("listAttTbl"), "listatt", [
+    { key: "name", label: "List", fmt: (v, r) => `${esc(v)} <span class="muted">${r.list_id !== "—" ? "#" + esc(r.list_id) : ""}</span>` },
+    { key: "dials", label: "Calls", num: true, fmt: n },
+    { key: "avg_attempt", label: "Avg attempt", num: true, fmt: v => v == null ? "—" : v.toFixed(1) },
+    ...BUCKETS.map(b => ({ key: "b_" + b, label: b, num: true, fmt: cell(b) })),
+    { key: "sales", label: "Sales", num: true, fmt: n },
+  ], rows, { col: "dials", dir: "desc" });
 }
 
 const fmtPhone = (p) => p && p.length === 10 ? `(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}` : esc(p);
@@ -358,19 +461,10 @@ function renderDids(d) {
     $("didTbl").innerHTML = "";
     return;
   }
-  table($("attTbl"), "att", [
-    { key: "bucket", label: "Attempt #" },
-    { key: "dials", label: "Calls", num: true, fmt: n },
-    { key: "share", label: "Share", num: true, fmt: v => pct(v, 0) },
-    { key: "amd_rate", label: "Machine %", num: true, fmt: v => rateCell(v, 0.65, 0.80) },
-    { key: "live_rate", label: "Live answer %", num: true, fmt: v => pct(v) },
-    { key: "contacts", label: "Contacts", num: true, fmt: n },
-    { key: "sales", label: "Sales", num: true, fmt: n },
-  ], d.attempts || [], { col: "bucket", dir: "asc" });
   const judged = dids.filter(x => x.health !== "low data").length;
   if (judged < dids.length * 0.2) {
     const per = d.kpis && dids.length ? (dids.reduce((a, x) => a + x.dials, 0) / dids.length) : 0;
-    note.innerHTML = `You used <b>${n(dids.length)} different caller IDs</b> today — about ${per.toFixed(1)} calls each. That's too few per number to judge any single one; the attempt table above is the better test. Sort by Live % to spot numbers that never connect as the day goes on.`;
+    note.innerHTML = `You used <b>${n(dids.length)} different caller IDs</b> today — about ${per.toFixed(1)} calls each. That's too few per number to judge any single one; the Lead attempts section is the better test. Sort by Live % to spot numbers that never connect as the day goes on.`;
     table($("didTbl"), "did", [
       { key: "cid", label: "Caller ID", fmt: fmtPhone },
       { key: "dials", label: "Calls", num: true, fmt: n },

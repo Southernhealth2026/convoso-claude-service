@@ -267,6 +267,9 @@ class InsightsStore:
         by_list = defaultdict(lambda: blank())
         by_cid = defaultdict(lambda: blank())
         by_attempt = defaultdict(lambda: blank())
+        by_exact = defaultdict(lambda: blank())          # attempt 1..20 (20 = 20+)
+        by_list_att = defaultdict(lambda: defaultdict(lambda: blank()))
+        list_att_sum = defaultdict(float)
         by_hour = defaultdict(lambda: blank())
 
         for c in calls:
@@ -276,7 +279,11 @@ class InsightsStore:
             if c.get("cid") and not c["inbound"]:
                 buckets.append(by_cid[c["cid"]])
             if c.get("attempt") is not None and not c["inbound"]:
-                buckets.append(by_attempt[attempt_bucket(c["attempt"])])
+                ab = attempt_bucket(c["attempt"])
+                buckets.append(by_attempt[ab])
+                buckets.append(by_exact[max(1, min(c["attempt"], 20))])
+                buckets.append(by_list_att[c["list_id"] or "—"][ab])
+                list_att_sum[c["list_id"] or "—"] += c["attempt"]
             for bucket in buckets:
                 bucket["dials"] += 1
                 bucket[cat] += 1
@@ -434,6 +441,81 @@ class InsightsStore:
                 "sales": int(b["sale"]),
             })
 
+        # Exact attempt curve (1..20+)
+        curve = []
+        for a in range(1, 21):
+            b = by_exact.get(a)
+            if not b:
+                continue
+            curve.append({
+                "attempt": a,
+                "label": f"{a}+" if a == 20 else str(a),
+                "dials": int(b["dials"]),
+                "live_rate": rate(b["contacts"] + b["dropped"], b["dials"]),
+                "amd_rate": rate(b["amd"], b["dials"]),
+                "contacts": int(b["contacts"]),
+                "sales": int(b["sale"]),
+            })
+
+        # Per list, split by attempt bucket
+        list_attempts = []
+        for lid, bks in by_list_att.items():
+            tot = sum(b["dials"] for b in bks.values())
+            if not tot:
+                continue
+            row = {
+                "list_id": lid,
+                "name": list_names.get(lid) or (f"List {lid}" if lid != "—" else "No list"),
+                "dials": int(tot),
+                "avg_attempt": list_att_sum[lid] / tot,
+                "sales": int(sum(b["sale"] for b in bks.values())),
+                "contacts": int(sum(b["contacts"] for b in bks.values())),
+                "buckets": {},
+            }
+            for _, _, label in ATTEMPT_BUCKETS:
+                b = bks.get(label)
+                if b and b["dials"]:
+                    row["buckets"][label] = {
+                        "dials": int(b["dials"]),
+                        "share": b["dials"] / tot,
+                        "live_rate": rate(b["contacts"] + b["dropped"], b["dials"]),
+                        "amd_rate": rate(b["amd"], b["dials"]),
+                        "sales": int(b["sale"]),
+                    }
+            old = row["buckets"].get("11+", {})
+            row["share_11"] = old.get("share", 0.0)
+            list_attempts.append(row)
+        list_attempts.sort(key=lambda r: -r["dials"])
+
+        # Headline numbers
+        att_dials = sum(x["dials"] for x in curve)
+        att_sum = sum(list_att_sum.values())
+        sales_total = sum(x["sales"] for x in curve)
+        sales_early = sum(x["sales"] for x in curve if x["attempt"] <= 3)
+        d11 = by_attempt.get("11+")
+        # Suggested cutoff: first attempt after which every later attempt
+        # (with enough calls) converts to a live person at under half the
+        # 1st-call rate and has produced no sales today.
+        first = curve[0]["live_rate"] if curve and curve[0]["attempt"] == 1 else None
+        cutoff = None
+        if first:
+            for i, x in enumerate(curve):
+                rest = [y for y in curve[i:] if y["dials"] >= 30]
+                if rest and all((y["live_rate"] or 0) < first * 0.5 and y["sales"] == 0 for y in rest):
+                    cutoff = x["attempt"] - 1
+                    break
+        attempt_summary = {
+            "avg_attempt": (att_sum / att_dials) if att_dials else None,
+            "share_11": rate(d11["dials"], att_dials) if d11 else 0.0,
+            "dials_11": int(d11["dials"]) if d11 else 0,
+            "sales_11": int(d11["sale"]) if d11 else 0,
+            "sales_early_share": rate(sales_early, sales_total),
+            "sales_total": int(sales_total),
+            "suggested_cutoff": cutoff,
+            "dials_past_cutoff": int(sum(x["dials"] for x in curve if cutoff and x["attempt"] > cutoff)),
+            "share_past_cutoff": rate(sum(x["dials"] for x in curve if cutoff and x["attempt"] > cutoff), att_dials) if cutoff else None,
+        }
+
         hours = []
         for h in sorted(k for k in by_hour if k >= 0):
             b = by_hour[h]
@@ -460,5 +542,8 @@ class InsightsStore:
             "dids": dids,
             "did_count": len(dids),
             "attempts": attempts,
+            "attempt_curve": curve,
+            "list_attempts": list_attempts,
+            "attempt_summary": attempt_summary,
             "did_avg_live_rate": avg_live,
         }
