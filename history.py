@@ -175,7 +175,31 @@ def build_views(agg, list_names):
         "sales_past_cutoff": int(sum(x["sales"] for x in past)),
         "total_dials": int(total_dials),
     }
+    # Trade-off table: what stopping after N calls would have saved / cost.
+    options = []
+    for k in (3, 5, 8, 10, 15, 19):
+        rest = [x for x in curve if x["attempt"] > k]
+        rd = sum(x["dials"] for x in rest)
+        if not rd:
+            continue
+        rs = sum(x["sales"] for x in rest)
+        kept_d = total_dials - rd
+        kept_s = sales_total - rs
+        options.append({
+            "stop_after": k,
+            "label": "20+" if k == 19 else str(k),
+            "dials_freed": int(rd),
+            "share_freed": _rate(rd, total_dials),
+            "sales_after": int(rs),
+            "share_sales_after": _rate(rs, sales_total),
+            "sales_per_1k_after": _rate(rs * 1000, rd),
+            "sales_per_1k_before": _rate(kept_s * 1000, kept_d),
+        })
+    first_rate = _rate(curve[0]["sales"] * 1000, curve[0]["dials"]) if curve and curve[0]["attempt"] == 1 else None
+
     return {
+        "cutoff_options": options,
+        "first_call_sales_per_1k": first_rate,
         "attempts": grouped,
         "attempt_curve": curve,
         "list_attempts": list_attempts,

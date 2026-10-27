@@ -156,6 +156,10 @@
     <div class="hint" style="margin-bottom:10px">Each bar is the % of calls a real person answered on that attempt. Hover a bar for calls, machine rate and sales.</div>
     <div id="attCurve" class="curve"></div>
 
+    <h3 class="h3">If you stopped calling a lead after…</h3>
+    <div class="hint" style="margin-bottom:10px">What a max-attempts limit would have freed up and what it would have cost, over the selected range. Freed calls only pay off if they go to fresher leads.</div>
+    <div class="tbl-wrap" style="margin-bottom:22px"><table id="cutTbl"></table></div>
+
     <h3 class="h3">Grouped</h3>
     <div class="tbl-wrap" style="margin-bottom:22px"><table id="attTbl"></table></div>
 
@@ -385,12 +389,14 @@ function renderAttempts(d) {
   if (!curve.length) { sec.style.display = "none"; return; }
   sec.style.display = "";
 
-  const cut = sm.suggested_cutoff;
+  const cut = null;
   const tiles = [
     ["Avg attempt #", sm.avg_attempt == null ? "—" : sm.avg_attempt.toFixed(1), "times a lead had been called, on average"],
     ["Dials on 11+ leads", pct(sm.share_11, 0), `${n(sm.dials_11)} calls · ${n(sm.sales_11)} sales`],
     ["Sales from 1st–3rd call", pct(sm.sales_early_share, 0), `of ${n(sm.sales_total)} sales today`],
-    ["Suggested cutoff", cut ? `Stop after ${cut}` : "—", cut ? `frees ${pct(sm.share_past_cutoff, 0)} of dials (${n(sm.dials_past_cutoff)})` + (sm.sales_past_cutoff != null ? ` · ${n(sm.sales_past_cutoff)} sale${sm.sales_past_cutoff === 1 ? "" : "s"} came after it` : "") : "not enough data yet"],
+    ["Sales per 1,000 calls", d.first_call_sales_per_1k == null ? "—" : d.first_call_sales_per_1k.toFixed(1),
+      (() => { const o = (d.cutoff_options || []).find(x => x.stop_after === 19);
+               return o && o.sales_per_1k_after != null ? `on 1st calls · vs ${o.sales_per_1k_after.toFixed(2)} on 20+ calls` : "on 1st calls"; })()],
   ];
   $("attKpis").innerHTML = tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("");
 
@@ -417,6 +423,16 @@ function renderAttempts(d) {
     $("attCurve").after(xs);
   }
   xs.innerHTML = curve.map(x => `<span>${x.label}</span>`).join("");
+
+  table($("cutTbl"), "cut", [
+    { key: "label", label: "Stop after", fmt: (v, r) => r.stop_after === 19 ? "19 calls (drop 20+)" : `${v} calls` },
+    { key: "dials_freed", label: "Calls freed", num: true, fmt: n },
+    { key: "share_freed", label: "% of all calls", num: true, fmt: v => pct(v, 0) },
+    { key: "sales_after", label: "Sales lost", num: true, fmt: n },
+    { key: "share_sales_after", label: "% of all sales", num: true, fmt: v => pct(v, 0) },
+    { key: "sales_per_1k_after", label: "Sales / 1k (dropped calls)", num: true, fmt: v => v == null ? "—" : v.toFixed(2) },
+    { key: "sales_per_1k_before", label: "Sales / 1k (kept calls)", num: true, fmt: v => v == null ? "—" : v.toFixed(2) },
+  ], d.cutoff_options || [], { col: "stop_after", dir: "asc" });
 
   // grouped table
   table($("attTbl"), "att", [
