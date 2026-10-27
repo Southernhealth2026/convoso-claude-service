@@ -15,6 +15,8 @@ Monitor inventory:
   08 Talk-time anomalies   /agent-performance/search talk_sec_pt
   09 Pause-time anomalies  /agent-performance/search pause_sec_pt
   10 Claude AI briefing    every N minutes; analyst-style summary
+  11 Dialing insights      /log/retrieve rolled up at /insights
+                           (dispositions, agents, lists, hours)
 
 v1.0 changes from v0.6:
   - Two new monitors (talk time, pause time)
@@ -37,7 +39,9 @@ from collections import deque
 import anthropic
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
+
+from insights import InsightsStore
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -257,6 +261,15 @@ class StateStore:
 
 
 state = StateStore()
+
+# Debug endpoints (/api/probe, /api/diagnose) can read raw lead data, so they
+# only work when ADMIN_KEY is set in Render and passed as ?key=...
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
+
+
+def require_admin():
+    if not ADMIN_KEY or request.args.get("key") != ADMIN_KEY:
+        abort(404)
 
 
 # ---------------------------------------------------------------------------
@@ -1567,8 +1580,31 @@ def run_all_monitors():
     log.info("Poll finished in %.2fs status=%s", time.time() - started, overall)
 
 
+insights = InsightsStore(convoso_post)
+
+
+def refresh_insights():
+    names = {}
+    try:
+        body = convoso_post("/lists/search", {"limit": 500, "offset": 0})
+        data = body.get("data") or []
+        if isinstance(data, dict):
+            data = data.get("entries") or list(data.values())
+        for L in data:
+            if isinstance(L, dict) and L.get("id") is not None:
+                names[str(L.get("id"))] = L.get("name") or f"List {L.get('id')}"
+    except Exception as e:
+        log.warning("Insights: list names unavailable: %s", e)
+    insights.refresh(list_names=names)
+
+
 def start_scheduler():
     sched = BackgroundScheduler(daemon=True)
+    sched.add_job(refresh_insights, "interval",
+                  seconds=int(os.environ.get("INSIGHTS_REFRESH_SECONDS", "120")),
+                  next_run_time=datetime.now() + timedelta(seconds=5),
+                  max_instances=1, coalesce=True,
+                  id="insights")
     sched.add_job(run_all_monitors, "interval",
                   seconds=POLL_INTERVAL_SECONDS,
                   next_run_time=datetime.now(),
@@ -1653,6 +1689,37 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+@app.route("/insights", methods=["GET"])
+def insights_page():
+    return render_template("insights.html")
+
+
+@app.route("/api/insights", methods=["GET"])
+def api_insights():
+    if insights.last_refresh is None and not insights.refreshing:
+        threading.Thread(target=refresh_insights, daemon=True).start()
+    agent_perf = {}
+    try:
+        body = convoso_post("/agent-performance/search", {})
+        if body.get("success"):
+            agent_perf = body.get("data") or {}
+    except Exception as e:
+        log.warning("Insights: agent-performance unavailable: %s", e)
+    data = insights.summary(
+        agent_perf=agent_perf,
+        campaign=request.args.get("campaign") or None,
+        direction=request.args.get("direction", "all"),
+    )
+    data["loading"] = insights.last_refresh is None
+    return jsonify(data)
+
+
+@app.route("/api/insights/refresh", methods=["POST"])
+def api_insights_refresh():
+    threading.Thread(target=refresh_insights, daemon=True).start()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/state", methods=["GET"])
 def api_state():
     return jsonify(state.snapshot())
@@ -1660,6 +1727,7 @@ def api_state():
 
 @app.route("/api/diagnose", methods=["GET"])
 def api_diagnose():
+    require_admin()
     paths_to_test = [
         ("/campaigns/search",          {"limit": 1, "offset": 0}),
         ("/lists/search",              {"limit": 1, "offset": 0}),
@@ -1693,6 +1761,7 @@ def api_diagnose():
 
 @app.route("/api/probe", methods=["GET"])
 def api_probe():
+    require_admin()
     path = request.args.get("path")
     if not path:
         return jsonify({"error": "Pass ?path=/some/endpoint"}), 400
