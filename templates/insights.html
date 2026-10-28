@@ -413,7 +413,7 @@ function renderAttempts(d) {
   const tiles = [
     ["Avg attempt #", sm.avg_attempt == null ? "—" : sm.avg_attempt.toFixed(1), "times a lead had been called, on average"],
     ["Dials on 11+ leads", pct(sm.share_11, 0), `${n(sm.dials_11)} calls · ${n(sm.sales_11)} sales`],
-    ["Sales from 1st–3rd call", pct(sm.sales_early_share, 0), `of ${n(sm.sales_total)} sales today`],
+    ["Sales from 1st–3rd call", pct(sm.sales_early_share, 0), `of ${n(sm.sales_total)} outbound sales`],
     ["Sales per 1,000 calls", d.first_call_sales_per_1k == null ? "—" : d.first_call_sales_per_1k.toFixed(1),
       (() => { const o = (d.cutoff_options || []).find(x => x.stop_after === 19);
                return o && o.sales_per_1k_after != null ? `on 1st calls · vs ${o.sales_per_1k_after.toFixed(2)} on 20+ calls` : "on 1st calls"; })()],
