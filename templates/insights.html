@@ -42,6 +42,12 @@
   .seg button:last-child { border-right: 0; }
   .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bone); }
   .stamp { font: 11px var(--mono); color: var(--ink-faint); }
+  .daypick { display: inline-flex; border: 1px solid var(--hairline-strong); background: var(--bone); }
+  .daypick button { border: 0; border-right: 1px solid var(--hairline); padding: 8px 11px; }
+  .daypick button:last-child { border-right: 0; border-left: 1px solid var(--hairline); }
+  .daypick input { border: 0; background: transparent; font: 500 12px var(--sans); color: var(--ink); padding: 0 8px; }
+  .daypick button[disabled] { opacity: .35; cursor: default; }
+  .pastnote { margin-top: 18px; padding: 10px 16px; border-left: 3px solid var(--gold); background: rgba(184,146,75,.10); font-size: 13px; display: none; }
 
   .banner { margin-top: 18px; padding: 12px 16px; border-left: 3px solid var(--warn); background: var(--warn-bg); font-size: 13px; display: none; }
   .banner.crit { border-color: var(--crit); background: var(--crit-bg); }
@@ -124,6 +130,12 @@
       <div class="sub" id="sub">Today's calls by disposition, agent, list and hour</div>
     </div>
     <div class="filters">
+      <div class="daypick" role="group" aria-label="Day">
+        <button id="dayPrev" title="Previous day" aria-label="Previous day">‹</button>
+        <input type="date" id="day" aria-label="Pick a day">
+        <button id="dayNext" title="Next day" aria-label="Next day">›</button>
+        <button id="dayToday">Today</button>
+      </div>
       <select id="campaign" aria-label="Campaign"><option value="">All campaigns</option></select>
       <div class="seg" role="group" aria-label="Direction">
         <button data-dir="all" aria-pressed="true">All</button>
@@ -135,6 +147,7 @@
     </div>
   </header>
 
+  <div class="pastnote" id="pastnote"></div>
   <div class="banner" id="banner"></div>
 
   <div class="kpis" id="kpis"></div>
@@ -281,6 +294,13 @@ function renderKpis(k, live) {
       ["Drop rate", pct(drop), dropFlag],
     ]],
   ];
+  if (DATA && DATA.past) {
+    // Drop rate only trusted from Convoso's live monitor (today)
+    const liveOnly = new Set(["Dial level", "Dialable leads", "Waiting calls", "Avg wait", "Drop rate"]);
+    groups.splice(0, 1);   // "Agents right now" is live-only
+    groups.forEach(g => { g[1] = g[1].filter(t => !liveOnly.has(t[0])); });
+    groups[0][0] = "Calls that day";
+  }
   $("kpis").innerHTML = groups.map(([g, tiles]) =>
     `<div class="kgroup"><div class="gname">${g}</div><div class="krow" style="--cols:${tiles.length}">` +
     tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("") +
@@ -545,8 +565,11 @@ let ATT = null, attDays = 1;
 async function loadAttempts() {
   const qs = new URLSearchParams({ days: attDays });
   const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
+  if (viewDate) qs.set("date", viewDate);
+  $("attRange").style.display = viewDate ? "none" : "";
   try {
     const a = await fetch("/api/attempts?" + qs, { cache: "no-store" }).then(r => r.json());
+    if (a.loading) { setTimeout(loadAttempts, 5000); return; }
     ATT = a;
     renderAttempts(a);
     const r = a.range || {};
@@ -569,12 +592,23 @@ document.querySelectorAll("#attRange button").forEach(b => b.onclick = () => {
 async function load() {
   const qs = new URLSearchParams({ direction });
   const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
+  if (viewDate) qs.set("date", viewDate);
+  const myDate = viewDate;
   try {
     const r = await fetch("/api/insights?" + qs, { cache: "no-store" });
     const d = await r.json();
+    if (myDate !== viewDate) return;          // user changed day meanwhile
     const banner = $("banner");
+    const note = $("pastnote");
+    if (viewDate) {
+      note.style.display = "block";
+      note.innerHTML = d.loading
+        ? `<b>Loading ${fmtDay(viewDate)} from Convoso…</b> ${d.load_status && d.load_status.rows ? n(d.load_status.rows) + " calls so far" : ""} — a full day takes about 30–60 seconds the first time.` +
+          (d.load_status && d.load_status.error ? ` <span style="color:var(--crit)">Error: ${esc(d.load_status.error)}</span>` : "")
+        : `Showing <b>${fmtDay(viewDate)}</b>, full day. Live numbers (agents right now, dial level, waiting calls) only show for today.`;
+    } else note.style.display = "none";
     if (d.loading && !(d.kpis && d.kpis.dials)) {
-      $("stamp").textContent = "Pulling today's calls from Convoso…";
+      $("stamp").textContent = viewDate ? "" : "Pulling today's calls from Convoso…";
       banner.style.display = "none";
       setTimeout(load, 5000);
       return;
@@ -585,11 +619,14 @@ async function load() {
     sel.innerHTML = `<option value="">All campaigns</option>` + (d.campaigns || []).map(c => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join("");
     const t = d.meta.last_refresh ? new Date(d.meta.last_refresh) : null;
     $("stamp").textContent = t ? `Updated ${t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${n(d.meta.calls_in_view)} calls` : "";
-    $("sub").textContent = `Today's calls by disposition, agent, list and hour${d.meta.day ? " · " + d.meta.day : ""}`;
+    $("sub").textContent = viewDate
+      ? `${fmtDay(viewDate)} · calls by disposition, agent, list and hour`
+      : `Today's calls by disposition, agent, list and hour${d.meta.day ? " · " + d.meta.day : ""}`;
+    if (viewDate) $("stamp").textContent = `${n(d.meta.calls_in_view)} calls`;
     if (d.meta.last_error) {
       banner.className = "banner crit"; banner.style.display = "block";
       banner.textContent = "Last pull from Convoso failed, showing the previous data: " + d.meta.last_error;
-    } else if (effectiveDrop(d.kpis, d.live) != null && effectiveDrop(d.kpis, d.live) > 0.03 && d.kpis.dials >= 100) {
+    } else if (!d.past && effectiveDrop(d.kpis, d.live) != null && effectiveDrop(d.kpis, d.live) > 0.03 && d.kpis.dials >= 100) {
       banner.className = "banner crit"; banner.style.display = "block";
       banner.innerHTML = `<b>Drop rate is ${pct(effectiveDrop(d.kpis, d.live))}.</b> Customers are answering with no agent free. Lower the dial level or add agents — the FCC limit for predictive dialing is 3% over 30 days.`;
     } else banner.style.display = "none";
@@ -608,8 +645,32 @@ document.querySelectorAll(".filters .seg button").forEach(b => b.onclick = () =>
 $("campaign").onchange = load;
 $("refresh").onclick = async () => { $("stamp").textContent = "Refreshing…"; await fetch("/api/insights/refresh", { method: "POST" }); setTimeout(load, 4000); };
 
+let viewDate = null;   // null = today
+const todayStr = () => { const t = new Date(); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const fmtDay = (s) => new Date(s + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+function shiftDay(s, k) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + k); return d.toISOString().slice(0, 10); }
+function setDay(s) {
+  const t = todayStr();
+  viewDate = (!s || s >= t) ? null : s;
+  $("day").value = viewDate || t;
+  $("day").max = t;
+  $("dayNext").disabled = !viewDate;
+  $("dayToday").disabled = !viewDate;
+  ATT = null;
+  try { const u = new URL(location.href); viewDate ? u.searchParams.set("date", viewDate) : u.searchParams.delete("date"); history.replaceState(null, "", u); } catch (e) {}
+  load();
+}
+$("day").onchange = () => setDay($("day").value);
+$("dayPrev").onclick = () => setDay(shiftDay(viewDate || todayStr(), -1));
+$("dayNext").onclick = () => setDay(viewDate ? shiftDay(viewDate, 1) : null);
+$("dayToday").onclick = () => setDay(null);
+(() => { let q = null; try { q = new URL(location.href).searchParams.get("date"); } catch (e) {}
+  viewDate = q && q < todayStr() ? q : null;
+  $("day").value = viewDate || todayStr(); $("day").max = todayStr();
+  $("dayNext").disabled = !viewDate; $("dayToday").disabled = !viewDate; })();
+
 load();
-setInterval(load, 20000);
+setInterval(() => { if (!viewDate) load(); }, 20000);
 </script>
 </body>
 </html>

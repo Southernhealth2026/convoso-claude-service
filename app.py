@@ -43,7 +43,8 @@ from flask import Flask, abort, jsonify, render_template, request
 
 from insights import InsightsStore
 from live import describe_shape, fetch_live
-from history import HistoryStore
+from history import HistoryStore, add_record, build_views, new_agg
+from dayview import PastDays, parse_day
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1586,6 +1587,7 @@ insights = InsightsStore(convoso_post)
 
 
 history = HistoryStore(convoso_post, insights)
+past_days = PastDays(convoso_post, insights)
 
 
 def refresh_insights():
@@ -1701,6 +1703,21 @@ def insights_page():
 
 @app.route("/api/insights", methods=["GET"])
 def api_insights():
+    day = parse_day(request.args.get("date"))
+    if day is not None:
+        store, st = past_days.get(day)
+        if store is None:
+            return jsonify({"past": True, "date": day.isoformat(), "loading": True,
+                            "load_status": st})
+        data = store.summary(
+            agent_perf={},
+            campaign=request.args.get("campaign") or None,
+            direction=request.args.get("direction", "all"),
+        )
+        data.update({"past": True, "date": day.isoformat(), "loading": False, "live": {}})
+        data["kpis"]["avg_wait"] = None
+        return jsonify(data)
+
     if insights.last_refresh is None and not insights.refreshing:
         threading.Thread(target=refresh_insights, daemon=True).start()
     agent_perf = {}
@@ -1758,6 +1775,25 @@ def api_live_shape():
 
 @app.route("/api/attempts", methods=["GET"])
 def api_attempts():
+    day = parse_day(request.args.get("date"))
+    if day is not None:
+        store, st = past_days.get(day)
+        if store is None:
+            return jsonify({"past": True, "loading": True, "load_status": st})
+        camp = request.args.get("campaign") or None
+        agg = new_agg()
+        with store.lock:
+            recs = list(store.calls.values())
+            names = dict(store.list_names)
+        for c in recs:
+            if camp and c["campaign"] != camp:
+                continue
+            add_record(agg, c)
+        out = build_views(agg, names)
+        out["range"] = {"days": 1, "loaded_days": 1, "loading": False,
+                        "from": day.isoformat(), "to": day.isoformat()}
+        out["past"] = True
+        return jsonify(out)
     try:
         days = int(request.args.get("days", "1"))
     except ValueError:
