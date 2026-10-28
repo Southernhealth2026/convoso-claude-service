@@ -105,6 +105,18 @@
   .inbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   .inbar b { display: block; height: 8px; background: rgb(var(--seq)); border-radius: 0 3px 3px 0; min-width: 1px; }
   .h3 { font: 600 19px var(--serif); margin: 18px 0 6px; }
+  .info { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; padding: 0; margin-left: 6px;
+          border-radius: 50%; border: 1px solid var(--gold); background: transparent; color: var(--gold);
+          font: italic 600 11px/1 Georgia, serif; cursor: pointer; vertical-align: 3px; letter-spacing: 0; text-transform: none; }
+  .info:hover, .info[aria-expanded="true"] { background: var(--gold); color: var(--bone); }
+  .gname .info { vertical-align: 0; width: 15px; height: 15px; font-size: 10px; }
+  .infopop { position: fixed; z-index: 60; max-width: 360px; background: var(--bone); color: var(--ink); border: 1px solid var(--hairline-strong);
+             box-shadow: 0 10px 30px rgba(14,34,64,.18); padding: 14px 16px; font: 13px/1.5 var(--sans); display: none; border-radius: 3px; }
+  .infopop h4 { margin: 0 0 6px; font: 600 16px var(--serif); }
+  .infopop p { margin: 0 0 8px; }
+  .infopop ul { margin: 0 0 8px; padding-left: 18px; }
+  .infopop li { margin-bottom: 3px; }
+  .infopop .eg { font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--hairline); padding-top: 8px; margin: 4px 0 0; }
   .curve { display: flex; align-items: flex-end; gap: 4px; height: 210px; padding: 26px 12px 0; border: 1px solid var(--hairline); background: var(--bone); position: relative; }
   .curve .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; position: relative; min-width: 0; }
   .curve .bar { width: 72%; max-width: 34px; background: rgb(var(--seq)); border-radius: 4px 4px 0 0; min-height: 2px; }
@@ -154,7 +166,7 @@
 
   <section id="attSec">
     <div class="sec-head">
-      <h2>Lead attempts</h2>
+      <h2>Lead attempts <button class="info" type="button" data-info="attempts" aria-label="What is this?">i</button></h2>
       <div class="seg" role="group" aria-label="Date range" id="attRange">
         <button data-days="1" aria-pressed="true">Today</button>
         <button data-days="7" aria-pressed="false">7 days</button>
@@ -165,25 +177,25 @@
     <div class="hint" style="margin-bottom:12px">How many times each lead had been called at the moment we dialed it. Fresh leads answer; leads called over and over mostly go to voicemail. <span id="attStatus"></span></div>
     <div class="krow kgroup" id="attKpis" style="--cols:4;margin-bottom:22px"></div>
 
-    <h3 class="h3">Live answers by attempt #</h3>
+    <h3 class="h3">Live answers by attempt # <button class="info" type="button" data-info="curve" aria-label="What is this?">i</button></h3>
     <div class="hint" style="margin-bottom:10px">Each bar is the % of calls a real person answered on that attempt. Hover a bar for calls, machine rate and sales.</div>
     <div id="attCurve" class="curve"></div>
 
-    <h3 class="h3">If you stopped calling a lead after…</h3>
+    <h3 class="h3">If you stopped calling a lead after… <button class="info" type="button" data-info="cutoff" aria-label="What is this?">i</button></h3>
     <div class="hint" style="margin-bottom:10px">What a max-attempts limit would have freed up and what it would have cost, over the selected range. Freed calls only pay off if they go to fresher leads.</div>
     <div class="tbl-wrap" style="margin-bottom:22px"><table id="cutTbl"></table></div>
 
-    <h3 class="h3">Grouped</h3>
+    <h3 class="h3">Grouped <button class="info" type="button" data-info="grouped" aria-label="What is this?">i</button></h3>
     <div class="tbl-wrap" style="margin-bottom:22px"><table id="attTbl"></table></div>
 
-    <h3 class="h3">By list</h3>
+    <h3 class="h3">By list <button class="info" type="button" data-info="byList" aria-label="What is this?">i</button></h3>
     <div class="hint" style="margin-bottom:10px">Where each list's dials are going. Darker cells = more of that list's dials are in that attempt range. Hover a cell for its live %, machine % and sales.</div>
     <div class="tbl-wrap"><table id="listAttTbl"></table></div>
   </section>
 
   <section>
     <div class="sec-head">
-      <h2>Dispositions</h2>
+      <h2>Dispositions <button class="info" type="button" data-info="dispositions" aria-label="What is this?">i</button></h2>
       <div class="hint">Every call today, grouped. Click a column on the right to sort. If your sale dispositions aren't counting as sales, tell Claude their exact names.</div>
     </div>
     <div class="grid2">
@@ -194,7 +206,7 @@
 
   <section>
     <div class="sec-head">
-      <h2>Agents</h2>
+      <h2>Agents <button class="info" type="button" data-info="agents" aria-label="What is this?">i</button></h2>
       <div class="legend">
         <span><i style="background:var(--c-talk)"></i>Talk</span>
         <span><i style="background:var(--c-pause)"></i>Pause</span>
@@ -208,7 +220,7 @@
 
   <section>
     <div class="sec-head">
-      <h2>Lists</h2>
+      <h2>Lists <button class="info" type="button" data-info="lists" aria-label="What is this?">i</button></h2>
       <div class="hint">Which lists produce. Sales per 100 dials is the number to weight your list mix by.</div>
     </div>
     <div class="tbl-wrap"><table id="listTbl"></table></div>
@@ -216,7 +228,7 @@
 
   <section>
     <div class="sec-head">
-      <h2>Caller IDs</h2>
+      <h2>Caller IDs <button class="info" type="button" data-info="callerids" aria-label="What is this?">i</button></h2>
       <div class="hint">Outbound calls grouped by the number they went out on. A number marked "Spam Likely" gets far fewer live answers than the rest, so compare each number against the team average.</div>
     </div>
     <div class="hint" id="didNote" style="margin-bottom:10px"></div>
@@ -226,13 +238,14 @@
 
   <section>
     <div class="sec-head">
-      <h2>By hour</h2>
+      <h2>By hour <button class="info" type="button" data-info="hours" aria-label="What is this?">i</button></h2>
       <div class="hint">Darker cell = better rate for that hour. Use it to time breaks and lunch away from your best contact hours.</div>
     </div>
     <div class="tbl-wrap"><table id="hourTbl"></table></div>
   </section>
 </div>
 <div class="tip" id="tip"></div>
+<div class="infopop" id="infopop" role="dialog"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -302,7 +315,7 @@ function renderKpis(k, live) {
     groups[0][0] = "Calls that day";
   }
   $("kpis").innerHTML = groups.map(([g, tiles]) =>
-    `<div class="kgroup"><div class="gname">${g}</div><div class="krow" style="--cols:${tiles.length}">` +
+    `<div class="kgroup"><div class="gname">${g} <button class="info" type="button" data-info="${GROUP_INFO[g] || ""}" aria-label="What is this?">i</button></div><div class="krow" style="--cols:${tiles.length}">` +
     tiles.map(([l, v, note]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="note">${note}</div></div>`).join("") +
     `</div></div>`).join("");
 }
@@ -644,6 +657,105 @@ document.querySelectorAll(".filters .seg button").forEach(b => b.onclick = () =>
 });
 $("campaign").onchange = load;
 $("refresh").onclick = async () => { $("stamp").textContent = "Refreshing…"; await fetch("/api/insights/refresh", { method: "POST" }); setTimeout(load, 4000); };
+
+
+// ---- ⓘ explanations -------------------------------------------------------
+const GROUP_INFO = { "Agents right now": "g_agents", "Today's calls": "g_calls", "Calls that day": "g_calls", "Dialing": "g_dialing" };
+const INFO = {
+  g_agents: ["Agents right now", `<p>A live snapshot of the floor straight from Convoso's Agent Monitor, refreshed every 20 seconds.</p>
+    <ul><li><b>In calls</b> — on the phone with someone.</li><li><b>Waiting</b> — ready, waiting for the dialer to connect a call.</li>
+    <li><b>Paused</b> — on break, lunch, or otherwise not taking calls. "In dispo" = wrapping up the last call.</li></ul>
+    <p class="eg">Lots of agents <i>waiting</i> = the dialer isn't finding people fast enough (lists or caller IDs). Lots <i>paused</i> = a floor-management issue.</p>`],
+  g_calls: ["Calls", `<ul><li><b>Calls</b> — every dial, inbound and outbound.</li><li><b>Contacts</b> — calls where an agent actually talked to a person.</li>
+    <li><b>Sales</b> — calls dispositioned "Sale" (not counting Southern Custo or "Pitched - No Sale").</li>
+    <li><b>Conversion</b> — sales ÷ contacts. How often a conversation turns into a deal.</li>
+    <li><b>Avg wait</b> — how long an agent sits idle between calls. Under ~1 min is healthy.</li>
+    <li><b>Avg handle</b> — average talk time per conversation.</li></ul>
+    <p class="eg">Sales come from Convoso dispositions, so they can differ from Zoho by one or two.</p>`],
+  g_dialing: ["Dialing", `<ul><li><b>Dial level</b> — how many lines the dialer calls per waiting agent.</li>
+    <li><b>Dialable leads</b> — leads left that the dialer is allowed to call; "in hopper" = queued up next.</li>
+    <li><b>Contact rate</b> — % of calls that reached a person.</li><li><b>Machine rate</b> — % of calls that hit voicemail. Over 80% is very high.</li>
+    <li><b>Waiting calls</b> — callers on hold right now with no agent.</li>
+    <li><b>Dropped calls / Drop rate</b> — a person answered but no agent was free, so the call was dropped. The FCC limit is 3%.</li></ul>
+    <p class="eg">High drop rate → lower the dial level. High machine rate → old lists or flagged caller IDs.</p>`],
+  attempts: ["Lead attempts", `<p>Groups every outbound call by <b>how many times that lead had already been called</b> when we dialed it.</p>
+    <p>Fresh leads (1st–3rd call) answer and buy far more often. Leads called 10, 20, 30+ times mostly go to voicemail.</p>
+    <p>Use <b>Today / 7 / 30 / 90 days</b> to see the pattern over time. Longer ranges take a few minutes to load the first time.</p>
+    <p class="eg">The big question this answers: how much of your dialer time is spent on leads that almost never pick up?</p>`],
+  curve: ["Live answers by attempt #", `<p>One bar per attempt number. Bar height = <b>% of calls a real person answered</b> on that attempt.</p>
+    <p>Green "sale" labels show where sales happened. Hover any bar for its calls, machine rate and sales.</p>
+    <p class="eg">If the bars drop off sharply after attempt 3–5 and stay flat, calls past that point are mostly wasted. Watch out for a tall bar built on very few calls — hover to check the count.</p>`],
+  cutoff: ["If you stopped calling a lead after…", `<p>"What if" table for setting a <b>max attempts</b> limit in Convoso.</p>
+    <ul><li><b>Calls freed</b> — calls that would not have been made.</li><li><b>Sales lost</b> — sales that came after that cutoff.</li>
+    <li><b>Sales / 1k</b> — sales per 1,000 calls, for the calls you'd drop vs the calls you'd keep.</li></ul>
+    <p class="eg">A cutoff only pays off if the freed calls go to fresher leads. If dropped calls make ~0.2 sales per 1,000 and 1st calls make ~6, moving the time over wins.</p>`],
+  grouped: ["Grouped", `<p>The same attempt data in five ranges: 1st call, 2–3, 4–6, 7–10, 11+.</p>
+    <ul><li><b>Share</b> — how much of your dialing goes to that range.</li><li><b>Machine %</b> — voicemail rate (orange = high, red = very high).</li>
+    <li><b>Live answer %</b> — reached a person.</li></ul>
+    <p class="eg">Healthy: most calls in the early ranges. Unhealthy: most calls in 11+.</p>`],
+  byList: ["By list", `<p>For each list, how its calls are spread across attempt ranges.</p>
+    <p>Each cell = % of that list's calls in that range. <b>Darker = more of the list's calls are there.</b> A green ●2 means 2 sales came from that range. Hover a cell for its live %, machine % and sales.</p>
+    <p class="eg">A list with dark 11+ cells and no sales is worn out — rest it or cap its attempts.</p>`],
+  dispositions: ["Dispositions", `<p>Every call grouped by how it ended.</p>
+    <ul><li><b>Left bars</b> — the big buckets (sale, conversation, machine, no answer, dropped, bad number, DNC).</li>
+    <li><b>Right table</b> — each actual Convoso disposition, how many calls got it, and what bucket it counts as. Click a column to sort.</li></ul>
+    <p class="eg">If a disposition is in the wrong bucket (like "Pitched - No Sale" counting as a sale), tell Claude its exact name.</p>`],
+  agents: ["Agents", `<p>One row per agent. Click any column to sort.</p>
+    <ul><li><b>Time split</b> — green talk, orange pause, blue wait, as a share of logged-in time (today only).</li>
+    <li><b>Convos</b> — real conversations. <b>Short</b> — conversations under 30 seconds (hung up on the opener).</li>
+    <li><b>Close %</b> — sales ÷ conversations. <b>Sales/hr</b> — sales per logged-in hour.</li>
+    <li><b>Top dispositions</b> — what that agent picks most.</li></ul>
+    <p class="eg">Coaching flags: high pause %, lots of short calls, or one agent using an unusual disposition a lot.</p>`],
+  lists: ["Lists", `<p>How each lead list performed.</p>
+    <ul><li><b>Share</b> — % of all calls that went to that list.</li><li><b>Contact %</b> — reached a person. <b>Machine %</b> — hit voicemail.</li>
+    <li><b>Sales/100</b> — sales per 100 calls. <b>This is the number to rank lists by.</b></li></ul>
+    <p class="eg">A list with a big share but low Sales/100 is eating dialer time — turn it down and give that time to the top lists.</p>`],
+  callerids: ["Caller IDs", `<p>Outbound calls grouped by the number they went out on, to spot numbers flagged as "Spam Likely".</p>
+    <p>A flagged number gets far fewer live answers than your other numbers on the same lists. Numbers need ~40+ calls before they can be judged.</p>
+    <p class="eg">You rotate a very large pool (1,000+ numbers, ~2 calls each per day), so single numbers rarely have enough calls. Use the Lead attempts section instead: if even 1st calls hit machines 70%+ of the time, people are screening your numbers.</p>`],
+  hours: ["By hour", `<p>Your day hour by hour (Eastern time).</p>
+    <p>Each cell's shade shows how that hour compares to the rest of the day — <b>darker blue = better</b> for dials/contacts/sales, <b>darker red = worse</b> for machine and drop rate. Hover a cell for the full numbers.</p>
+    <p class="eg">Schedule breaks and lunch in the weakest contact hours, and have everyone on the phones in the strongest ones.</p>`],
+};
+const pop = $("infopop");
+let popFor = null;
+function showInfo(btn) {
+  const item = INFO[btn.dataset.info];
+  if (!item) return;
+  pop.innerHTML = `<h4>${item[0]}</h4>${item[1]}`;
+  pop.style.display = "block";
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(360, innerWidth - 24);
+  pop.style.maxWidth = w + "px";
+  let left = Math.min(r.left, innerWidth - w - 12); left = Math.max(12, left);
+  let top = r.bottom + 8;
+  if (top + pop.offsetHeight > innerHeight - 12) top = Math.max(12, r.top - pop.offsetHeight - 8);
+  pop.style.left = left + "px"; pop.style.top = top + "px";
+  document.querySelectorAll(".info[aria-expanded]").forEach(b => b.removeAttribute("aria-expanded"));
+  btn.setAttribute("aria-expanded", "true");
+  popFor = btn;
+}
+let pinned = false;
+function hideInfo() { pop.style.display = "none"; if (popFor) popFor.removeAttribute("aria-expanded"); popFor = null; pinned = false; }
+const canHover = () => matchMedia("(hover: hover)").matches;
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".info");
+  if (b) {
+    e.preventDefault(); e.stopPropagation();
+    if (popFor === b && pinned) { hideInfo(); return; }
+    showInfo(b); pinned = true;   // click keeps it open
+    return;
+  }
+  if (!e.target.closest("#infopop")) hideInfo();
+}, true);
+document.addEventListener("mouseover", (e) => { const b = e.target.closest(".info"); if (b && canHover() && !pinned) showInfo(b); });
+document.addEventListener("mouseout", (e) => {
+  const b = e.target.closest(".info");
+  if (b && canHover() && !pinned && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("#infopop"))) hideInfo();
+});
+pop.addEventListener("mouseleave", () => { if (canHover() && !pinned) hideInfo(); });
+addEventListener("scroll", hideInfo, { passive: true });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideInfo(); });
 
 let viewDate = null;   // null = today
 const todayStr = () => { const t = new Date(); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
