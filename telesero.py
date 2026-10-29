@@ -37,7 +37,7 @@ BASE = os.environ.get("TELESERO_BASE", "https://portal.teleserosuite.com").rstri
 SRC_TZ = ZoneInfo(os.environ.get("TELESERO_TZ", "America/New_York"))
 PAGE = int(os.environ.get("TELESERO_PAGE", "2000"))
 REFRESH_SECONDS = int(os.environ.get("TELESERO_REFRESH_SECONDS", "120"))
-MIN_SPLIT_SECONDS = 60
+MIN_SPLIT_SECONDS = 120
 CACHE_DAYS = 7
 
 # Global disposition statuses from Telesero (Campaigns → Disposition Statuses)
@@ -108,7 +108,13 @@ def _rows(body):
 
 
 def _fmt(dt):
-    return dt.astimezone(SRC_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    """Telesero's DateTime object: {"date": "mm-dd-yyyy", "time": "hh:mm"}."""
+    d = dt.astimezone(SRC_TZ)
+    return {"date": d.strftime("%m-%d-%Y"), "time": d.strftime("%H:%M")}
+
+
+def _floor_min(dt):
+    return dt.replace(second=0, microsecond=0)
 
 
 def fetch_conversations(start, end, extra=None):
@@ -117,9 +123,14 @@ def fetch_conversations(start, end, extra=None):
     if extra:
         body.update(extra)
     rows = _rows(_post("/api/post-conversations-filter", body))
-    if len(rows) >= PAGE and (end - start).total_seconds() > MIN_SPLIT_SECONDS:
-        mid = start + (end - start) / 2
-        return fetch_conversations(start, mid, extra) + fetch_conversations(mid, end, extra)
+    if len(rows) >= PAGE:
+        span = (end - start).total_seconds()
+        if span > MIN_SPLIT_SECONDS:
+            mid = _floor_min(start + (end - start) / 2)
+            if mid <= start:
+                mid = start + timedelta(minutes=1)
+            return fetch_conversations(start, mid, extra) + fetch_conversations(mid, end, extra)
+        log.warning("Telesero: %s-%s returned a full page (%d); some calls may be missing", start, end, PAGE)
     return rows
 
 
