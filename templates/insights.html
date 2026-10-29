@@ -309,7 +309,7 @@ function renderKpis(k, live) {
     ]],
     ["Dialing", [
       ["Dial level", live.dial_level == null ? "—" : Number(live.dial_level).toFixed(1), live.dial_level_campaign ? esc(live.dial_level_campaign) : ""],
-      ["Dialable leads", lv(live.dialable_leads), live.hopper != null ? `${n(live.hopper)} in hopper` : ""],
+      ["Dialable leads", lv(live.dialable_leads), live.hopper != null ? `${n(live.hopper)} in hopper` : (live.dialable_note || "")],
       ["Contact rate", pct(k.contact_rate), "contacts / calls"],
       ["Machine rate", pct(k.amd_rate), amdFlag],
       ["Waiting calls", lv(live.calls_waiting), "in queue now"],
@@ -319,7 +319,8 @@ function renderKpis(k, live) {
   ];
   if (DATA && (DATA.past || DATA.src === "telesero")) {
     // Drop rate only trusted from Convoso's live monitor (today)
-    const liveOnly = new Set(["Dial level", "Dialable leads", "Waiting calls", "Avg wait", "Drop rate"]);
+    const liveOnly = new Set(["Dial level", "Waiting calls", "Avg wait", "Drop rate"]);
+    if (DATA.past || live.dialable_leads == null) liveOnly.add("Dialable leads");
     groups.splice(0, 1);   // "Agents right now" is live-only
     groups.forEach(g => { g[1] = g[1].filter(t => !liveOnly.has(t[0])); });
     groups[0][0] = DATA.past ? "Calls that day" : "Today's calls";

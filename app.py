@@ -1735,6 +1735,11 @@ def api_insights():
             data = tele_today.summary(agent_perf={}, **common)
             data["loading"] = tele_today.last_refresh is None
         data.update({"src": "telesero", "live": {}})
+        if day is None:
+            try:
+                data["live"] = telesero.live_stats(common["campaign"])
+            except Exception as e:
+                log.warning("Telesero live stats: %s", e)
         data["kpis"]["avg_wait"] = None
         return jsonify(data)
     if day is not None:

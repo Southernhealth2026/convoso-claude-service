@@ -168,13 +168,14 @@ class Names:
     def __init__(self):
         self.campaigns = {}
         self.lists = {}
+        self.dialable = {}     # campaign name -> dialable leads on contactable lists
         self.at = 0
         self.lock = threading.Lock()
 
     def refresh(self, force=False):
         if not configured() or (not force and time.time() - self.at < 1800):
             return
-        camps, lists = {}, {}
+        camps, lists, dial = {}, {}, {}
         try:
             for c in _rows(_get("/api/get-campaigns")):
                 if not isinstance(c, dict):
@@ -184,9 +185,12 @@ class Names:
                 try:
                     for L in _rows(_get(f"/api/get-lead-lists/{c.get('id')}")):
                         if isinstance(L, dict):
-                            rid = str(L.get("remote_id") or L.get("remote_list_id") or L.get("list_id") or L.get("id") or "")
+                            rid = str(L.get("key") or L.get("remote_id") or L.get("remote_list_id") or L.get("list_id") or L.get("id") or "")
                             if rid:
                                 lists[rid] = L.get("name") or L.get("description") or f"List {rid}"
+                                if L.get("contactable") in (True, 1, "1", "true") and L.get("dialable_lead_count") is not None:
+                                    camp_name = camps[key]
+                                    dial[camp_name] = dial.get(camp_name, 0) + int(_num(L.get("dialable_lead_count")))
                 except Exception as e:
                     log.warning("Telesero lists for campaign %s: %s", key, e)
         except Exception as e:
@@ -196,6 +200,7 @@ class Names:
                 self.campaigns = camps
             if lists:
                 self.lists = lists
+                self.dialable = dial
             self.at = time.time()
 
 
@@ -365,3 +370,14 @@ def describe_sample(limit=3):
         "fields": {k: (repr(v) if k in safe else type(v).__name__) for k, v in (rows[0].items() if rows else [])},
         "now_eastern": end.strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+def live_stats(campaign=None):
+    """What Telesero's API can tell us right now (dialable leads only)."""
+    names.refresh()
+    with names.lock:
+        d = dict(names.dialable)
+    if not d:
+        return {}
+    total = d.get(campaign, 0) if campaign else sum(d.values())
+    return {"dialable_leads": total, "dialable_note": "on active lists"}
