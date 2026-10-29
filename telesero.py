@@ -188,7 +188,8 @@ class Names:
                             rid = str(L.get("key") or L.get("remote_id") or L.get("remote_list_id") or L.get("list_id") or L.get("id") or "")
                             if rid:
                                 lists[rid] = L.get("name") or L.get("description") or f"List {rid}"
-                                if L.get("contactable") in (True, 1, "1", "true") and L.get("dialable_lead_count") is not None:
+                                running = not any(w in str(c.get("status") or "").lower() for w in ("abort", "pause", "stop"))
+                                if running and L.get("contactable") in (True, 1, "1", "true") and L.get("dialable_lead_count") is not None:
                                     camp_name = camps[key]
                                     dial[camp_name] = dial.get(camp_name, 0) + int(_num(L.get("dialable_lead_count")))
                 except Exception as e:
@@ -380,4 +381,4 @@ def live_stats(campaign=None):
     if not d:
         return {}
     total = d.get(campaign, 0) if campaign else sum(d.values())
-    return {"dialable_leads": total, "dialable_note": "on active lists"}
+    return {"dialable_leads": total, "dialable_note": "running campaigns, active lists"}
