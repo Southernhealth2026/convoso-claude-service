@@ -45,6 +45,7 @@ from insights import InsightsStore
 from live import describe_shape, fetch_live
 from history import HistoryStore, add_record, build_views, new_agg
 from dayview import PastDays, parse_day
+import telesero
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1588,6 +1589,13 @@ insights = InsightsStore(convoso_post)
 
 history = HistoryStore(convoso_post, insights)
 past_days = PastDays(convoso_post, insights)
+tele_today = telesero.TeleseroToday()
+tele_past = telesero.TeleseroPast()
+
+
+def refresh_telesero():
+    if telesero.configured():
+        tele_today.refresh()
 
 
 def refresh_insights():
@@ -1607,6 +1615,11 @@ def refresh_insights():
 
 def start_scheduler():
     sched = BackgroundScheduler(daemon=True)
+    sched.add_job(refresh_telesero, "interval",
+                  seconds=telesero.REFRESH_SECONDS,
+                  next_run_time=datetime.now() + timedelta(seconds=15),
+                  max_instances=1, coalesce=True,
+                  id="telesero")
     sched.add_job(refresh_insights, "interval",
                   seconds=int(os.environ.get("INSIGHTS_REFRESH_SECONDS", "120")),
                   next_run_time=datetime.now() + timedelta(seconds=5),
@@ -1704,6 +1717,26 @@ def insights_page():
 @app.route("/api/insights", methods=["GET"])
 def api_insights():
     day = parse_day(request.args.get("date"))
+    if request.args.get("src") == "telesero":
+        if not telesero.configured():
+            return jsonify({"src": "telesero", "not_configured": True})
+        common = dict(campaign=request.args.get("campaign") or None,
+                      direction=request.args.get("direction", "all"))
+        if day is not None:
+            store, st = tele_past.get(day)
+            if store is None:
+                return jsonify({"src": "telesero", "past": True, "date": day.isoformat(),
+                                "loading": True, "load_status": st})
+            data = store.summary(agent_perf={}, **common)
+            data.update({"past": True, "date": day.isoformat(), "loading": False})
+        else:
+            if tele_today.last_refresh is None and not tele_today.refreshing:
+                threading.Thread(target=refresh_telesero, daemon=True).start()
+            data = tele_today.summary(agent_perf={}, **common)
+            data["loading"] = tele_today.last_refresh is None
+        data.update({"src": "telesero", "live": {}})
+        data["kpis"]["avg_wait"] = None
+        return jsonify(data)
     if day is not None:
         store, st = past_days.get(day)
         if store is None:
@@ -1776,6 +1809,28 @@ def api_live_shape():
 @app.route("/api/attempts", methods=["GET"])
 def api_attempts():
     day = parse_day(request.args.get("date"))
+    if request.args.get("src") == "telesero":
+        if not telesero.configured():
+            return jsonify({"not_configured": True})
+        if day is not None:
+            store, st = tele_past.get(day)
+            if store is None:
+                return jsonify({"loading": True, "load_status": st})
+        else:
+            store = tele_today
+        camp = request.args.get("campaign") or None
+        agg = new_agg()
+        with store.lock:
+            recs = list(store.calls.values())
+            names = dict(store.list_names)
+        for c in recs:
+            if camp and c["campaign"] != camp:
+                continue
+            add_record(agg, c)
+        out = build_views(agg, names)
+        d0 = (day or datetime.now(telesero.TZ).date()).isoformat()
+        out["range"] = {"days": 1, "loaded_days": 1, "loading": False, "from": d0, "to": d0}
+        return jsonify(out)
     if day is not None:
         store, st = past_days.get(day)
         if store is None:
@@ -1799,6 +1854,15 @@ def api_attempts():
     except ValueError:
         days = 1
     return jsonify(history.view(days, campaign=request.args.get("campaign") or None))
+
+
+@app.route("/api/telesero/shape", methods=["GET"])
+def api_telesero_shape():
+    """Field names/types of a few recent Telesero calls (no lead data)."""
+    try:
+        return jsonify(telesero.describe_sample())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/api/insights/refresh", methods=["POST"])

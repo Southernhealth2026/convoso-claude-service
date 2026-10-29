@@ -42,6 +42,12 @@
   .seg button:last-child { border-right: 0; }
   .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bone); }
   .stamp { font: 11px var(--mono); color: var(--ink-faint); }
+  .srctabs { display: flex; gap: 0; border-bottom: 1px solid var(--hairline-strong); margin-bottom: 22px; }
+  .srctabs button { border: 0; background: transparent; padding: 10px 18px 11px; font: 600 14px var(--sans); color: var(--ink-faint);
+                    border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer; border-radius: 0; }
+  .srctabs button span { font-weight: 400; }
+  .srctabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--gold); }
+  .srctabs button:hover { color: var(--ink); }
   .daypick { display: inline-flex; border: 1px solid var(--hairline-strong); background: var(--bone); }
   .daypick button { border: 0; border-right: 1px solid var(--hairline); padding: 8px 11px; }
   .daypick button:last-child { border-right: 0; border-left: 1px solid var(--hairline); }
@@ -135,9 +141,13 @@
 </head>
 <body>
 <div class="wrap">
+  <nav class="srctabs" role="tablist" aria-label="Dialer">
+    <button role="tab" data-src="convoso" aria-selected="true">Convoso <span>· Southern Health</span></button>
+    <button role="tab" data-src="telesero" aria-selected="false">Telesero <span>· Marketing</span></button>
+  </nav>
   <header class="masthead">
     <div>
-      <div class="brand-line">Southern Health · <a href="/dashboard">Operations Brief</a> · Dialing Insights</div>
+      <div class="brand-line"><span id="brandName">Southern Health</span> · <a href="/dashboard">Operations Brief</a> · Dialing Insights</div>
       <h1>Dialing <em>Insights</em></h1>
       <div class="sub" id="sub">Today's calls by disposition, agent, list and hour</div>
     </div>
@@ -226,7 +236,7 @@
     <div class="tbl-wrap"><table id="listTbl"></table></div>
   </section>
 
-  <section>
+  <section id="cidSec">
     <div class="sec-head">
       <h2>Caller IDs <button class="info" type="button" data-info="callerids" aria-label="What is this?">i</button></h2>
       <div class="hint">Outbound calls grouped by the number they went out on. A number marked "Spam Likely" gets far fewer live answers than the rest, so compare each number against the team average.</div>
@@ -307,12 +317,12 @@ function renderKpis(k, live) {
       ["Drop rate", pct(drop), dropFlag],
     ]],
   ];
-  if (DATA && DATA.past) {
+  if (DATA && (DATA.past || DATA.src === "telesero")) {
     // Drop rate only trusted from Convoso's live monitor (today)
     const liveOnly = new Set(["Dial level", "Dialable leads", "Waiting calls", "Avg wait", "Drop rate"]);
     groups.splice(0, 1);   // "Agents right now" is live-only
     groups.forEach(g => { g[1] = g[1].filter(t => !liveOnly.has(t[0])); });
-    groups[0][0] = "Calls that day";
+    groups[0][0] = DATA.past ? "Calls that day" : "Today's calls";
   }
   $("kpis").innerHTML = groups.map(([g, tiles]) =>
     `<div class="kgroup"><div class="gname">${g} <button class="info" type="button" data-info="${GROUP_INFO[g] || ""}" aria-label="What is this?">i</button></div><div class="krow" style="--cols:${tiles.length}">` +
@@ -579,10 +589,12 @@ async function loadAttempts() {
   const qs = new URLSearchParams({ days: attDays });
   const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
   if (viewDate) qs.set("date", viewDate);
-  $("attRange").style.display = viewDate ? "none" : "";
+  if (src !== "convoso") qs.set("src", src);
+  $("attRange").style.display = (viewDate || src !== "convoso") ? "none" : "";
   try {
     const a = await fetch("/api/attempts?" + qs, { cache: "no-store" }).then(r => r.json());
     if (a.loading) { setTimeout(loadAttempts, 5000); return; }
+    if (a.not_configured) return;
     ATT = a;
     renderAttempts(a);
     const r = a.range || {};
@@ -606,11 +618,19 @@ async function load() {
   const qs = new URLSearchParams({ direction });
   const camp = $("campaign").value; if (camp) qs.set("campaign", camp);
   if (viewDate) qs.set("date", viewDate);
-  const myDate = viewDate;
+  if (src !== "convoso") qs.set("src", src);
+  const myDate = viewDate, mySrc = src;
   try {
     const r = await fetch("/api/insights?" + qs, { cache: "no-store" });
     const d = await r.json();
-    if (myDate !== viewDate) return;          // user changed day meanwhile
+    if (myDate !== viewDate || mySrc !== src) return;   // user changed day/tab meanwhile
+    $("brandName").textContent = src === "telesero" ? "Marketing · Telesero" : "Southern Health · Convoso";
+    $("cidSec").style.display = src === "telesero" ? "none" : "";
+    if (d.not_configured) {
+      $("pastnote").style.display = "block";
+      $("pastnote").innerHTML = "<b>Telesero isn't connected yet.</b> Add the TELESERO_API_KEY setting in Render to turn this tab on.";
+      $("stamp").textContent = ""; $("kpis").innerHTML = ""; return;
+    }
     const banner = $("banner");
     const note = $("pastnote");
     if (viewDate) {
@@ -618,7 +638,10 @@ async function load() {
       note.innerHTML = d.loading
         ? `<b>Loading ${fmtDay(viewDate)} from Convoso…</b> ${d.load_status && d.load_status.rows ? n(d.load_status.rows) + " calls so far" : ""} — a full day takes about 30–60 seconds the first time.` +
           (d.load_status && d.load_status.error ? ` <span style="color:var(--crit)">Error: ${esc(d.load_status.error)}</span>` : "")
-        : `Showing <b>${fmtDay(viewDate)}</b>, full day. Live numbers (agents right now, dial level, waiting calls) only show for today.`;
+        : `Showing <b>${fmtDay(viewDate)}</b>, full day.` + (src === "convoso" ? ` Live numbers (agents right now, dial level, waiting calls) only show for today.` : "");
+    } else if (src === "telesero" && !d.not_configured) {
+      note.style.display = "block";
+      note.innerHTML = `Telesero (marketing dialer). Live agent status, dial level and caller IDs aren't available from Telesero's API — use Telesero's own monitoring page for those.`;
     } else note.style.display = "none";
     if (d.loading && !(d.kpis && d.kpis.dials)) {
       $("stamp").textContent = viewDate ? "" : "Pulling today's calls from Convoso…";
@@ -639,7 +662,7 @@ async function load() {
     if (d.meta.last_error) {
       banner.className = "banner crit"; banner.style.display = "block";
       banner.textContent = "Last pull from Convoso failed, showing the previous data: " + d.meta.last_error;
-    } else if (!d.past && effectiveDrop(d.kpis, d.live) != null && effectiveDrop(d.kpis, d.live) > 0.03 && d.kpis.dials >= 100) {
+    } else if (!d.past && d.src !== "telesero" && effectiveDrop(d.kpis, d.live) != null && effectiveDrop(d.kpis, d.live) > 0.03 && d.kpis.dials >= 100) {
       banner.className = "banner crit"; banner.style.display = "block";
       banner.innerHTML = `<b>Drop rate is ${pct(effectiveDrop(d.kpis, d.live))}.</b> Customers are answering with no agent free. Lower the dial level or add agents — the FCC limit for predictive dialing is 3% over 30 days.`;
     } else banner.style.display = "none";
@@ -757,6 +780,7 @@ pop.addEventListener("mouseleave", () => { if (canHover() && !pinned) hideInfo()
 addEventListener("scroll", hideInfo, { passive: true });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideInfo(); });
 
+let src = "convoso";
 let viewDate = null;   // null = today
 const todayStr = () => { const t = new Date(); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const fmtDay = (s) => new Date(s + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
@@ -772,11 +796,23 @@ function setDay(s) {
   try { const u = new URL(location.href); viewDate ? u.searchParams.set("date", viewDate) : u.searchParams.delete("date"); history.replaceState(null, "", u); } catch (e) {}
   load();
 }
+function setSrc(v) {
+  src = v === "telesero" ? "telesero" : "convoso";
+  document.querySelectorAll(".srctabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src));
+  $("campaign").value = "";
+  ATT = null; DATA = null;
+  document.title = (src === "telesero" ? "Telesero" : "Convoso") + " · Dialing Insights";
+  try { const u = new URL(location.href); src === "telesero" ? u.searchParams.set("src", "telesero") : u.searchParams.delete("src"); history.replaceState(null, "", u); } catch (e) {}
+  load();
+}
+document.querySelectorAll(".srctabs button").forEach(b => b.onclick = () => setSrc(b.dataset.src));
 $("day").onchange = () => setDay($("day").value);
 $("dayPrev").onclick = () => setDay(shiftDay(viewDate || todayStr(), -1));
 $("dayNext").onclick = () => setDay(viewDate ? shiftDay(viewDate, 1) : null);
 $("dayToday").onclick = () => setDay(null);
-(() => { let q = null; try { q = new URL(location.href).searchParams.get("date"); } catch (e) {}
+(() => { let q = null; try { q = new URL(location.href).searchParams.get("date");
+    if (new URL(location.href).searchParams.get("src") === "telesero") { src = "telesero";
+      document.querySelectorAll(".srctabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src)); } } catch (e) {}
   viewDate = q && q < todayStr() ? q : null;
   $("day").value = viewDate || todayStr(); $("day").max = todayStr();
   $("dayNext").disabled = !viewDate; $("dayToday").disabled = !viewDate; })();
