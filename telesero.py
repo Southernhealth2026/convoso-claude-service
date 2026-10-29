@@ -55,7 +55,7 @@ STATUS = {
     "QVMAIL": ("Queue Abandon Voicemail Left", "dropped"),
     "CALLBK": ("Call Back", "contact"), "CBHOLD": ("Call Back Hold", "contact"),
     "DEC": ("Declined Sale", "contact"), "NI": ("Not Interested", "contact"),
-    "NP": ("No Pitch No Price", "contact"), "XFER": ("Call Transferred", "contact"),
+    "NP": ("No Pitch No Price", "other"),   # Telesero: human answer, but not a customer contact "XFER": ("Call Transferred", "contact"),
     "SALE": ("Sale Made", "sale"),
     "DNC": ("DO NOT CALL", "dnc"), "DNCC": ("DO NOT CALL Hopper Camp Match", "dnc"),
     "DNCL": ("DO NOT CALL Hopper Sys Match", "dnc"),
@@ -345,8 +345,21 @@ def describe_sample(limit=3):
     rows = _rows(body)
     safe = ("status", "campaign_key", "is_outbound", "call_timestamp", "called_count",
             "length", "term_reason", "user_group", "is_manual_dial", "remote_list_id")
+    lists_shape = None
+    try:
+        camps = _rows(_get("/api/get-campaigns"))
+        if camps:
+            ll = _rows(_get(f"/api/get-lead-lists/{camps[0].get('id')}"))
+            if ll:
+                lists_shape = {k: (repr(v) if isinstance(v, (int, str)) and k.lower() in ("id", "remote_id", "list_id", "name", "description", "remote_list_id", "key") else type(v).__name__)
+                               for k, v in ll[0].items()}
+            else:
+                lists_shape = f"no lists for campaign {camps[0].get('id')}"
+    except Exception as e:
+        lists_shape = f"error: {e}"
     return {
         "configured": True,
+        "lists_shape": lists_shape,
         "top_level": (list(body.keys()) if isinstance(body, dict) else f"list[{len(body)}]"),
         "rows_returned": len(rows),
         "fields": {k: (repr(v) if k in safe else type(v).__name__) for k, v in (rows[0].items() if rows else [])},
