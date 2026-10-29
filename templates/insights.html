@@ -110,6 +110,11 @@
 
   .inbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   .inbar b { display: block; height: 8px; background: rgb(var(--seq)); border-radius: 0 3px 3px 0; min-width: 1px; }
+  .agentsec { background: #E6F0FA; border: 1px solid #C9DCF0; border-radius: 6px; padding: 18px 22px 22px; }
+  .agentsec .sec-head { border-bottom-color: #B7CFE8; }
+  .agentsec .tbl-wrap, .agentsec th { background: #F5F9FD; }
+  .agentsec tr:hover td { background: rgba(59,102,196,.07); }
+  @media (max-width: 960px) { .agentsec { padding: 14px 12px 16px; } }
   .h3 { font: 600 19px var(--serif); margin: 18px 0 6px; }
   .info { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; padding: 0; margin-left: 6px;
           border-radius: 50%; border: 1px solid var(--gold); background: transparent; color: var(--gold);
@@ -174,6 +179,20 @@
 
   <div class="kpis" id="kpis"></div>
 
+  <section id="agentSec" class="agentsec">
+    <div class="sec-head">
+      <h2>Agents <button class="info" type="button" data-info="agents" aria-label="What is this?">i</button></h2>
+      <div class="legend" id="agentLegend">
+        <span><i style="background:var(--c-talk)"></i>Talk</span>
+        <span><i style="background:var(--c-pause)"></i>Pause</span>
+        <span><i style="background:var(--c-wait)"></i>Wait</span>
+        <span class="muted">· share of logged-in time</span>
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:10px">Short = conversations under 30 seconds (hang-ups on the opener). High pause or high short-call counts are the coaching targets.</div>
+    <div class="tbl-wrap"><table id="agentTbl"></table></div>
+  </section>
+
   <section id="attSec">
     <div class="sec-head">
       <h2>Lead attempts <button class="info" type="button" data-info="attempts" aria-label="What is this?">i</button></h2>
@@ -214,19 +233,6 @@
     </div>
   </section>
 
-  <section>
-    <div class="sec-head">
-      <h2>Agents <button class="info" type="button" data-info="agents" aria-label="What is this?">i</button></h2>
-      <div class="legend">
-        <span><i style="background:var(--c-talk)"></i>Talk</span>
-        <span><i style="background:var(--c-pause)"></i>Pause</span>
-        <span><i style="background:var(--c-wait)"></i>Wait</span>
-        <span class="muted">· share of logged-in time</span>
-      </div>
-    </div>
-    <div class="hint" style="margin-bottom:10px">Short = conversations under 30 seconds (hang-ups on the opener). High pause or high short-call counts are the coaching targets.</div>
-    <div class="tbl-wrap"><table id="agentTbl"></table></div>
-  </section>
 
   <section>
     <div class="sec-head">
@@ -388,7 +394,9 @@ function renderAll() {
   ], d.statuses, { col: "count", dir: "desc" });
 
   const maxH = Math.max(1, ...d.lists.map(l => l.dials));
-  table($("agentTbl"), "agent", [
+  const hasTime = (d.agents || []).some(a => a.logged_sec);
+  $("agentLegend").style.display = hasTime ? "" : "none";
+  const agentCols = [
     { key: "name", label: "Agent" },
     { key: "logged_sec", label: "Logged in", num: true, fmt: dur },
     { key: "talk_pct", label: "Time split", fmt: (v, r) => {
@@ -407,7 +415,8 @@ function renderAll() {
     { key: "close_rate", label: "Close %", num: true, fmt: v => pct(v) },
     { key: "sales_per_hour", label: "Sales/hr", num: true, fmt: v => v == null ? "—" : v.toFixed(2) },
     { key: "top_dispos", label: "Top dispositions", fmt: v => `<span class="dispos">${(v || []).map(x => `${esc(x.status)} ${x.count}`).join(" · ")}</span>` },
-  ], d.agents, { col: "sales", dir: "desc" });
+  ].filter(c => hasTime || !["logged_sec", "talk_pct", "pause_pct", "sales_per_hour"].includes(c.key));
+  table($("agentTbl"), "agent", agentCols, d.agents, { col: "sales", dir: "desc" });
 
   table($("listTbl"), "list", [
     { key: "name", label: "List", fmt: (v, r) => `${esc(v)} <span class="muted">${r.list_id !== "—" ? "#" + esc(r.list_id) : ""}</span>` },
