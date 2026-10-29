@@ -385,6 +385,9 @@ class InsightsStore:
                 "pause_pct": _num(p.get("pause_sec_pt")) if p else None,
                 "dispo_pct": _num(_first(p, "wrapup_sec_pt", "dispo_sec_pt")) if p and _first(p, "wrapup_sec_pt", "dispo_sec_pt") is not None else None,
                 "sales_per_hour": (a["sale"] / hours) if hours else None,
+                # idle time between calls: logged-in seconds x wait % / calls taken
+                "avg_wait": ((logged * _num(p.get("wait_sec_pt")) / 100.0) / _num(p.get("calls")))
+                            if (logged and p and _num(p.get("calls")) > 0 and p.get("wait_sec_pt") not in (None, "")) else None,
                 "top_dispos": [{"status": k, "count": v} for k, v in top],
             })
         agents = [a for a in agents

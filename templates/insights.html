@@ -110,10 +110,10 @@
 
   .inbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   .inbar b { display: block; height: 8px; background: rgb(var(--seq)); border-radius: 0 3px 3px 0; min-width: 1px; }
-  .agentsec { background: #E6F0FA; border: 1px solid #C9DCF0; border-radius: 6px; padding: 18px 22px 22px; }
-  .agentsec .sec-head { border-bottom-color: #B7CFE8; }
-  .agentsec .tbl-wrap, .agentsec th { background: #F5F9FD; }
-  .agentsec tr:hover td { background: rgba(59,102,196,.07); }
+  .agentsec { background: #E8F3EC; border: 1px solid #C7E0CF; border-radius: 6px; padding: 18px 22px 22px; }
+  .agentsec .sec-head { border-bottom-color: #B3D3BE; }
+  .agentsec .tbl-wrap, .agentsec th { background: #F6FAF7; }
+  .agentsec tr:hover td { background: rgba(74,110,74,.08); }
   @media (max-width: 960px) { .agentsec { padding: 14px 12px 16px; } }
   .h3 { font: 600 19px var(--serif); margin: 18px 0 6px; }
   .info { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; padding: 0; margin-left: 6px;
@@ -410,12 +410,13 @@ function renderAll() {
     { key: "handled", label: "Calls", num: true, fmt: n },
     { key: "contacts", label: "Convos", num: true, fmt: n },
     { key: "avg_talk", label: "Avg talk", num: true, fmt: dur },
+    { key: "avg_wait", label: "Avg wait", num: true, fmt: v => v == null ? "—" : `<span ${v > 90 ? 'style="color:var(--warn);font-weight:600"' : ""}>${dur(v)}</span>` },
     { key: "short_calls", label: "Short", num: true, fmt: (v, r) => r.contacts ? `${n(v)} <span class="muted">(${pct(v / r.contacts, 0)})</span>` : n(v) },
     { key: "sales", label: "Sales", num: true, fmt: n },
     { key: "close_rate", label: "Close %", num: true, fmt: v => pct(v) },
     { key: "sales_per_hour", label: "Sales/hr", num: true, fmt: v => v == null ? "—" : v.toFixed(2) },
     { key: "top_dispos", label: "Top dispositions", fmt: v => `<span class="dispos">${(v || []).map(x => `${esc(x.status)} ${x.count}`).join(" · ")}</span>` },
-  ].filter(c => hasTime || !["logged_sec", "talk_pct", "pause_pct", "sales_per_hour"].includes(c.key));
+  ].filter(c => hasTime || !["logged_sec", "talk_pct", "pause_pct", "sales_per_hour", "avg_wait"].includes(c.key));
   table($("agentTbl"), "agent", agentCols, d.agents, { col: "sales", dir: "desc" });
 
   table($("listTbl"), "list", [
@@ -736,6 +737,7 @@ const INFO = {
   agents: ["Agents", `<p>One row per agent. Click any column to sort.</p>
     <ul><li><b>Time split</b> — green talk, orange pause, blue wait, as a share of logged-in time (today only).</li>
     <li><b>Convos</b> — real conversations. <b>Short</b> — conversations under 30 seconds (hung up on the opener).</li>
+    <li><b>Avg wait</b> — how long the agent sits ready between calls (today, Convoso only). Over 1:30 turns orange — the dialer isn't feeding them fast enough.</li>
     <li><b>Close %</b> — sales ÷ conversations. <b>Sales/hr</b> — sales per logged-in hour.</li>
     <li><b>Top dispositions</b> — what that agent picks most.</li></ul>
     <p class="eg">Coaching flags: high pause %, lots of short calls, or one agent using an unusual disposition a lot.</p>`],
