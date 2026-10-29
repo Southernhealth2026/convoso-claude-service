@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <title>Dialing Insights · Southern Health</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  (function () { var t = "dark"; try { t = localStorage.getItem("di-theme") || "dark"; } catch (e) {}
+    document.documentElement.setAttribute("data-theme", t); })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -19,9 +23,30 @@
     --c-talk: #1F8A6E; --c-pause: #C2741A; --c-wait: #3B66C4;
     /* sequential (one hue) for magnitude bars / heat cells */
     --seq: 31, 77, 140;
+    --bad: 140, 47, 47;
+    --panel: #E8F3EC; --panel-border: #C7E0CF; --panel-line: #B3D3BE; --panel-tbl: #F6FAF7;
+    --shadow: rgba(14,34,64,.18);
+    --on-strong: #FAF7F0;
+    color-scheme: light;
     --serif: 'Cormorant Garamond', Garamond, serif;
     --sans: 'Manrope', -apple-system, sans-serif;
     --mono: 'JetBrains Mono', Menlo, monospace;
+  }
+  /* Dark mode (default). Light mode = html[data-theme="light"]. */
+  :root[data-theme="dark"] {
+    --ink: #E6E9EF; --ink-soft: #B7BECB; --ink-faint: rgba(230,233,239,.56);
+    --paper: #0B0D11; --bone: #14171D; --gold: #D2AE68;
+    --hairline: rgba(255,255,255,.09); --hairline-strong: rgba(255,255,255,.18);
+    --good: #6FBF85; --good-bg: rgba(111,191,133,.14);
+    --warn: #E3A35A; --warn-bg: rgba(227,163,90,.15);
+    --crit: #F07B7B; --crit-bg: rgba(240,123,123,.14);
+    --c-talk: #24997A; --c-pause: #C97825; --c-wait: #6A8CE0;
+    --seq: 88, 140, 230;
+    --bad: 230, 95, 95;
+    --panel: #0F1F18; --panel-border: #1F3A2C; --panel-line: #285040; --panel-tbl: #12261D;
+    --shadow: rgba(0,0,0,.55);
+    --on-strong: #FFFFFF;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -48,6 +73,7 @@
   .srctabs button span { font-weight: 400; }
   .srctabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--gold); }
   .srctabs button:hover { color: var(--ink); }
+  .srctabs .themebtn { margin-left: auto; border: 1px solid var(--hairline-strong); border-radius: 14px; padding: 4px 12px; font: 500 12px var(--sans); margin-bottom: 8px; align-self: center; }
   .daypick { display: inline-flex; border: 1px solid var(--hairline-strong); background: var(--bone); }
   .daypick button { border: 0; border-right: 1px solid var(--hairline); padding: 8px 11px; }
   .daypick button:last-child { border-right: 0; border-left: 1px solid var(--hairline); }
@@ -110,9 +136,9 @@
 
   .inbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   .inbar b { display: block; height: 8px; background: rgb(var(--seq)); border-radius: 0 3px 3px 0; min-width: 1px; }
-  .agentsec { background: #E8F3EC; border: 1px solid #C7E0CF; border-radius: 6px; padding: 18px 22px 22px; }
-  .agentsec .sec-head { border-bottom-color: #B3D3BE; }
-  .agentsec .tbl-wrap, .agentsec th { background: #F6FAF7; }
+  .agentsec { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 18px 22px 22px; }
+  .agentsec .sec-head { border-bottom-color: var(--panel-line); }
+  .agentsec .tbl-wrap, .agentsec th { background: var(--panel-tbl); }
   .agentsec tr:hover td { background: rgba(74,110,74,.08); }
   @media (max-width: 960px) { .agentsec { padding: 14px 12px 16px; } }
   .h3 { font: 600 19px var(--serif); margin: 18px 0 6px; }
@@ -122,7 +148,7 @@
   .info:hover, .info[aria-expanded="true"] { background: var(--gold); color: var(--bone); }
   .gname .info { vertical-align: 0; width: 15px; height: 15px; font-size: 10px; }
   .infopop { position: fixed; z-index: 60; max-width: 360px; background: var(--bone); color: var(--ink); border: 1px solid var(--hairline-strong);
-             box-shadow: 0 10px 30px rgba(14,34,64,.18); padding: 14px 16px; font: 13px/1.5 var(--sans); display: none; border-radius: 3px; }
+             box-shadow: 0 10px 30px var(--shadow); padding: 14px 16px; font: 13px/1.5 var(--sans); display: none; border-radius: 3px; }
   .infopop h4 { margin: 0 0 6px; font: 600 16px var(--serif); }
   .infopop p { margin: 0 0 8px; }
   .infopop ul { margin: 0 0 8px; padding-left: 18px; }
@@ -149,6 +175,7 @@
   <nav class="srctabs" role="tablist" aria-label="Dialer">
     <button role="tab" data-src="convoso" aria-selected="true">Convoso <span>· Southern Health</span></button>
     <button role="tab" data-src="telesero" aria-selected="false">Telesero <span>· Marketing</span></button>
+    <button id="themeBtn" class="themebtn" type="button" aria-label="Switch light/dark mode">☀ Light</button>
   </nav>
   <header class="masthead">
     <div>
@@ -218,7 +245,7 @@
     <div class="tbl-wrap" style="margin-bottom:22px"><table id="attTbl"></table></div>
 
     <h3 class="h3">By list <button class="info" type="button" data-info="byList" aria-label="What is this?">i</button></h3>
-    <div class="hint" style="margin-bottom:10px">Where each list's dials are going. Darker cells = more of that list's dials are in that attempt range. Hover a cell for its live %, machine % and sales.</div>
+    <div class="hint" style="margin-bottom:10px">Where each list's dials are going. Stronger color = more of that list's dials are in that attempt range. Hover a cell for its live %, machine % and sales.</div>
     <div class="tbl-wrap"><table id="listAttTbl"></table></div>
   </section>
 
@@ -255,7 +282,7 @@
   <section>
     <div class="sec-head">
       <h2>By hour <button class="info" type="button" data-info="hours" aria-label="What is this?">i</button></h2>
-      <div class="hint">Darker cell = better rate for that hour. Use it to time breaks and lunch away from your best contact hours.</div>
+      <div class="hint">Stronger blue = better for that hour; stronger red = worse (machine, drop). Use it to time breaks and lunch away from your best contact hours.</div>
     </div>
     <div class="tbl-wrap"><table id="hourTbl"></table></div>
   </section>
@@ -509,7 +536,7 @@ function renderAttempts(d) {
     const x = r.buckets[b];
     if (!x) return `<span class="muted">—</span>`;
     const a = Math.max(0.05, x.share) * 0.6;
-    const fg = a > 0.4 ? "#FAF7F0" : "var(--ink)";
+    const fg = a > 0.4 ? "var(--on-strong)" : "var(--ink)";
     const tip = `<b>${esc(r.name)} · attempt ${b}</b><br>${n(x.dials)} calls (${pct(x.share, 0)} of list)<br>Live ${pct(x.live_rate)} · Machine ${pct(x.amd_rate)} · ${n(x.sales)} sales`;
     return `<div data-tip="${tip}" style="background:rgba(var(--seq),${a});color:${fg};padding:3px 6px;border-radius:2px;text-align:right">${pct(x.share, 0)}${x.sales ? ` <b style="color:${a > 0.4 ? "#CFE8CF" : "var(--good)"}">●${x.sales}</b>` : ""}</div>`;
   };
@@ -587,8 +614,8 @@ function renderHours(hours) {
     return `<tr><td style="width:110px"><b>${label}</b></td>${hours.map(h => {
       const v = h[key];
       const a = v == null ? 0 : Math.max(0.06, v / max) * 0.55;
-      const bg = isBad ? `rgba(140,47,47,${a})` : `rgba(var(--seq),${a})`;
-      const fg = a > 0.47 ? "#FAF7F0" : "var(--ink)";
+      const bg = isBad ? `rgba(var(--bad),${a})` : `rgba(var(--seq),${a})`;
+      const fg = a > 0.47 ? "var(--on-strong)" : "var(--ink)";
       return `<td class="heat" style="background:${bg};color:${fg}" data-tip="<b>${hourLbl(h.hour)}</b><br>${n(h.dials)} dials · ${n(h.contacts)} convos · ${n(h.sales)} sales<br>Contact ${pct(h.contact_rate)} · Machine ${pct(h.amd_rate)} · Drop ${pct(h.drop_rate)}">${fmt(v)}</td>`;
     }).join("")}</tr>`;
   }).join("");
@@ -728,8 +755,8 @@ const INFO = {
     <li><b>Live answer %</b> — reached a person.</li></ul>
     <p class="eg">Healthy: most calls in the early ranges. Unhealthy: most calls in 11+.</p>`],
   byList: ["By list", `<p>For each list, how its calls are spread across attempt ranges.</p>
-    <p>Each cell = % of that list's calls in that range. <b>Darker = more of the list's calls are there.</b> A green ●2 means 2 sales came from that range. Hover a cell for its live %, machine % and sales.</p>
-    <p class="eg">A list with dark 11+ cells and no sales is worn out — rest it or cap its attempts.</p>`],
+    <p>Each cell = % of that list's calls in that range. <b>Stronger color = more of the list's calls are there.</b> A green ●2 means 2 sales came from that range. Hover a cell for its live %, machine % and sales.</p>
+    <p class="eg">A list with strong-colored 11+ cells and no sales is worn out — rest it or cap its attempts.</p>`],
   dispositions: ["Dispositions", `<p>Every call grouped by how it ended.</p>
     <ul><li><b>Left bars</b> — the big buckets (sale, conversation, machine, no answer, dropped, bad number, DNC).</li>
     <li><b>Right table</b> — each actual Convoso disposition, how many calls got it, and what bucket it counts as. Click a column to sort.</li></ul>
@@ -749,7 +776,7 @@ const INFO = {
     <p>A flagged number gets far fewer live answers than your other numbers on the same lists. Numbers need ~40+ calls before they can be judged.</p>
     <p class="eg">You rotate a very large pool (1,000+ numbers, ~2 calls each per day), so single numbers rarely have enough calls. Use the Lead attempts section instead: if even 1st calls hit machines 70%+ of the time, people are screening your numbers.</p>`],
   hours: ["By hour", `<p>Your day hour by hour (Eastern time).</p>
-    <p>Each cell's shade shows how that hour compares to the rest of the day — <b>darker blue = better</b> for dials/contacts/sales, <b>darker red = worse</b> for machine and drop rate. Hover a cell for the full numbers.</p>
+    <p>Each cell's shade shows how that hour compares to the rest of the day — <b>stronger blue = better</b> for dials/contacts/sales, <b>stronger red = worse</b> for machine and drop rate. Hover a cell for the full numbers.</p>
     <p class="eg">Schedule breaks and lunch in the weakest contact hours, and have everyone on the phones in the strongest ones.</p>`],
 };
 const pop = $("infopop");
@@ -810,21 +837,29 @@ function setDay(s) {
 }
 function setSrc(v) {
   src = v === "telesero" ? "telesero" : "convoso";
-  document.querySelectorAll(".srctabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src));
+  document.querySelectorAll(".srctabs button[data-src]").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src));
   $("campaign").value = "";
   ATT = null; DATA = null;
   document.title = (src === "telesero" ? "Telesero" : "Convoso") + " · Dialing Insights";
   try { const u = new URL(location.href); src === "telesero" ? u.searchParams.set("src", "telesero") : u.searchParams.delete("src"); history.replaceState(null, "", u); } catch (e) {}
   load();
 }
-document.querySelectorAll(".srctabs button").forEach(b => b.onclick = () => setSrc(b.dataset.src));
+document.querySelectorAll(".srctabs button[data-src]").forEach(b => b.onclick = () => setSrc(b.dataset.src));
+function paintThemeBtn() { const d = document.documentElement.getAttribute("data-theme") === "dark"; $("themeBtn").textContent = d ? "☀ Light" : "☾ Dark"; }
+$("themeBtn").onclick = () => {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("di-theme", next); } catch (e) {}
+  paintThemeBtn(); renderAll();
+};
+paintThemeBtn();
 $("day").onchange = () => setDay($("day").value);
 $("dayPrev").onclick = () => setDay(shiftDay(viewDate || todayStr(), -1));
 $("dayNext").onclick = () => setDay(viewDate ? shiftDay(viewDate, 1) : null);
 $("dayToday").onclick = () => setDay(null);
 (() => { let q = null; try { q = new URL(location.href).searchParams.get("date");
     if (new URL(location.href).searchParams.get("src") === "telesero") { src = "telesero";
-      document.querySelectorAll(".srctabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src)); } } catch (e) {}
+      document.querySelectorAll(".srctabs button[data-src]").forEach(b => b.setAttribute("aria-selected", b.dataset.src === src)); } } catch (e) {}
   viewDate = q && q < todayStr() ? q : null;
   $("day").value = viewDate || todayStr(); $("day").max = todayStr();
   $("dayNext").disabled = !viewDate; $("dayToday").disabled = !viewDate; })();
